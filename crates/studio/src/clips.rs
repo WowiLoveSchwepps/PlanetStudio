@@ -22,7 +22,7 @@ pub struct DecodedClip {
 
 impl DecodedClip {
     pub fn decode(net: &Network, clip: &ClipInfo) -> anyhow::Result<Self> {
-        let rig = net.main_rig().ok_or_else(|| anyhow::anyhow!("aucun squelette"))?;
+        let rig = net.main_rig().ok_or_else(|| anyhow::anyhow!(tr!("aucun squelette", "no skeleton")))?;
         let bc = net.bone_frames(clip)?;
         // une trajectoire immobile n'apporte rien
         let trajectory = bc.trajectory.filter(|t| {
@@ -201,9 +201,9 @@ impl BodyPart {
     pub const ALL: [BodyPart; 3] = [BodyPart::All, BodyPart::Upper, BodyPart::Lower];
     pub fn label(self) -> &'static str {
         match self {
-            BodyPart::All => "Tout le corps",
-            BodyPart::Upper => "Haut du corps",
-            BodyPart::Lower => "Bas du corps",
+            BodyPart::All => tr!("Tout le corps", "Full body"),
+            BodyPart::Upper => tr!("Haut du corps", "Upper body"),
+            BodyPart::Lower => tr!("Bas du corps", "Lower body"),
         }
     }
     /// Masque par os : le haut du corps = SPINELOWER et ses descendants.

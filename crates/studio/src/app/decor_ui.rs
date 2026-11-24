@@ -58,13 +58,13 @@ impl StudioApp {
     /// Lance le chargement d'un décor (remplace le précédent à son arrivée).
     pub(super) fn request_decor(&mut self, settings: DecorSettings) {
         let Some(game) = self.game.clone() else {
-            self.status = "Ouvrez d'abord le dossier du jeu".into();
+            self.status = tr!("Ouvrez d'abord le dossier du jeu", "Open the game folder first").into();
             return;
         };
         self.decor.request += 1;
         self.decor.loading = true;
         self.decor.applied = Some(settings.clone());
-        self.status = format!("Chargement du décor de {}…", settings.zone);
+        self.status = trf!("Chargement du décor de {}…", "Loading the {} scenery…", settings.zone);
         self.loader.load_decor(game, settings, self.decor.request, self.renderer.texture_names());
     }
 
@@ -91,17 +91,18 @@ impl StudioApp {
                     }
                 }
                 let s = &data.settings;
-                self.decor.info = format!(
+                self.decor.info = trf!(
                     "{} objets, {} modèles, {} textures ; sol à {:.1} m",
+                    "{} objects, {} models, {} textures; ground at {:.1} m",
                     data.instances.len(),
                     data.models.len(),
                     data.textures.len(),
                     s.ground.unwrap_or(0.0)
                 );
                 if !data.failed.is_empty() {
-                    self.decor.info += &format!(" ; {} acteurs illisibles", data.failed.len());
+                    self.decor.info += &trf!(" ; {} acteurs illisibles", "; {} unreadable actors", data.failed.len());
                 }
-                self.status = format!("Décor de {} chargé : {}", s.zone, self.decor.info);
+                self.status = trf!("Décor de {} chargé : {}", "{} scenery loaded: {}", s.zone, self.decor.info);
                 // la hauteur estimée devient celle du brouillon (pour l'ajuster)
                 if self.decor.draft.zone == s.zone && self.decor.draft.center == s.center {
                     self.decor.draft.ground = s.ground;
@@ -110,13 +111,13 @@ impl StudioApp {
             }
             Err(e) => {
                 self.decor.applied = None;
-                self.status = format!("Impossible de charger le décor : {e}");
+                self.status = trf!("Impossible de charger le décor : {e}", "Could not load the scenery: {e}");
             }
         }
     }
 
     pub(super) fn decor_menu(&mut self, ui: &mut egui::Ui) {
-        if ui.button("🗺 Choisir une carte et un lieu…").clicked() {
+        if ui.button(tr!("🗺 Choisir une carte et un lieu…", "🗺 Choose a map and a place…")).clicked() {
             if let Some(a) = &self.decor.applied {
                 self.decor.draft = a.clone();
                 self.decor.ground_auto = false;
@@ -125,7 +126,7 @@ impl StudioApp {
             ui.close_menu();
         }
         let mut visible = self.renderer.decor_visible;
-        if ui.add_enabled(self.decor.applied.is_some(), egui::Checkbox::new(&mut visible, "Afficher le décor")).changed() {
+        if ui.add_enabled(self.decor.applied.is_some(), egui::Checkbox::new(&mut visible, tr!("Afficher le décor", "Show scenery"))).changed() {
             self.renderer.decor_visible = visible;
             if let Some(a) = &mut self.decor.applied {
                 a.visible = visible;
@@ -136,14 +137,14 @@ impl StudioApp {
         self.particles_controls(ui);
         ui.separator();
         ui.horizontal(|ui| {
-            ui.label("Ombres du décor sur");
+            ui.label(tr!("Ombres du décor sur", "Scenery shadows over"));
             ui.add(crate::calc::drag(&mut self.renderer.decor_shadow_range).range(10.0..=400.0).speed(1.0).suffix(" m"))
                 .on_hover_text(
-                    "Demi-côté de la zone où le décor reçoit les ombres, autour des personnages. \
-                     Plus grand : ombres plus lointaines mais moins précises.",
+                    tr!("Demi-côté de la zone où le décor reçoit les ombres, autour des personnages. \
+                     Plus grand : ombres plus lointaines mais moins précises.", "Half-width of the area where the scenery casts shadows, around the characters. Larger: shadows reach farther but are less precise."),
                 );
         });
-        if ui.add_enabled(self.decor.applied.is_some(), egui::Button::new("Retirer le décor")).clicked() {
+        if ui.add_enabled(self.decor.applied.is_some(), egui::Button::new(tr!("Retirer le décor", "Remove scenery"))).clicked() {
             self.clear_decor();
             ui.close_menu();
         }
@@ -161,59 +162,76 @@ impl StudioApp {
     /// S'applique tout de suite.
     fn sky_controls(&mut self, ui: &mut egui::Ui) {
         let Some(a) = &self.decor.applied else {
-            ui.add_enabled(false, egui::Checkbox::new(&mut true, "Ciel de la carte"));
+            ui.add_enabled(false, egui::Checkbox::new(&mut true, tr!("Ciel de la carte", "Map sky")));
             return;
         };
         let mut s = a.clone();
         let (mut reload, mut fog_changed) = (false, false);
         ui.horizontal(|ui| {
             reload |= ui
-                .checkbox(&mut s.sky, "Ciel de la carte")
-                .on_hover_text("Dôme du ciel peint par le jeu pour ce continent, derrière le décor")
+                .checkbox(&mut s.sky, tr!("Ciel de la carte", "Map sky"))
+                .on_hover_text(tr!("Dôme du ciel peint par le jeu pour ce continent, derrière le décor", "Sky dome painted by the game for this continent, behind the scenery"))
                 .changed();
             let h = ui.add_enabled(
                 s.sky,
                 egui::Slider::new(&mut s.sky_hour, 0.0..=24.0)
                     .step_by(0.5)
                     .custom_formatter(|v, _| format!("{}h{:02}", v as u32, ((v.fract()) * 60.0).round() as u32))
-                    .text("heure"),
+                    .text(tr!("heure", "hour")),
             );
             // le ciel est relu (fichier, texture) à la fin du glisser seulement
             reload |= h.drag_stopped() || (h.changed() && !h.dragged());
         });
         ui.add_enabled_ui(s.sky, |ui| {
             reload |= ui
-                .checkbox(&mut s.sun_follows, "Le soleil suit l'heure")
+                .checkbox(&mut s.sun_follows, tr!("Le soleil suit l'heure", "The sun follows the hour"))
                 .on_hover_text(
-                    "Direction, couleur et force du soleil (la lune la nuit) et lumière ambiante                      prises dans le ciel du jeu à cette heure. Décochez pour régler le soleil à la main.",
+                    tr!(
+                        "Direction, couleur et force du soleil (la lune la nuit) et lumière ambiante \
+                         prises dans le ciel du jeu à cette heure. Décochez pour régler le soleil à la main.",
+                        "Sun direction, color and strength (the moon at night) and ambient light \
+                         taken from the game's sky at this hour. Uncheck to set the sun by hand."
+                    ),
                 )
                 .changed();
             ui.horizontal(|ui| {
                 fog_changed |= ui
-                    .checkbox(&mut s.fog, "Brouillard")
+                    .checkbox(&mut s.fog, tr!("Brouillard", "Fog"))
                     .on_hover_text(
-                        "Brouillard du jeu : plus dense près du sol et au loin ; le décor lointain se                          fond dans le ciel là où s'arrête le terrain",
+                        tr!(
+                            "Brouillard du jeu : plus dense près du sol et au loin ; le décor lointain se \
+                             fond dans le ciel là où s'arrête le terrain",
+                            "The game's fog: denser near the ground and in the distance; far scenery \
+                             fades into the sky where the terrain ends"
+                        ),
                     )
                     .changed();
                 fog_changed |= ui
                     .add_enabled(
                         s.fog,
-                        egui::Slider::new(&mut s.fog_density, 0.0..=4.0).text("densité").custom_formatter(|v, _| format!("{v:.2}×")),
+                        egui::Slider::new(&mut s.fog_density, 0.0..=4.0).text(tr!("densité", "density")).custom_formatter(|v, _| format!("{v:.2}×")),
                     )
                     .changed();
             });
             ui.horizontal(|ui| {
                 fog_changed |= ui
-                    .checkbox(&mut s.sun_rays, "Rayons du soleil")
+                    .checkbox(&mut s.sun_rays, tr!("Rayons du soleil", "Sun rays"))
                     .on_hover_text(
-                        "Brouillard ombré : l'air éclairé par le soleil s'illumine, coupé par l'ombre des                          arbres, des bâtiments et des personnages (surtout face au soleil). Seulement dans la                          zone des ombres du décor.",
+                        tr!(
+                            "Brouillard ombré : l'air éclairé par le soleil s'illumine, coupé par l'ombre des \
+                             arbres, des bâtiments et des personnages (surtout face au soleil). Seulement dans la \
+                             zone des ombres du décor.",
+                            "Shadowed fog: sunlit air glows, cut by the shadows of trees, buildings \
+                             and characters (mostly when facing the sun). Only within the \
+                             scenery's shadow area."
+                        ),
                     )
                     .changed();
                 fog_changed |= ui
                     .add_enabled(
                         s.sun_rays,
                         egui::Slider::new(&mut s.sun_rays_strength, 0.0..=4.0)
-                            .text("force")
+                            .text(tr!("force", "strength"))
                             .custom_formatter(|v, _| format!("{v:.2}×")),
                     )
                     .changed();
@@ -221,15 +239,22 @@ impl StudioApp {
         });
         ui.horizontal(|ui| {
             fog_changed |= ui
-                .checkbox(&mut s.lamps, "Lampes du décor")
+                .checkbox(&mut s.lamps, tr!("Lampes du décor", "Scenery lamps"))
                 .on_hover_text(
-                    "Lampes, néons et projecteurs placés par le jeu sur la carte : ils éclairent le sol,                      les bâtiments et les personnages autour d'eux (surtout visibles la nuit). Les plus                      proches de la caméra seulement (128), sans ombre.",
+                    tr!(
+                        "Lampes, néons et projecteurs placés par le jeu sur la carte : ils éclairent le sol, \
+                         les bâtiments et les personnages autour d'eux (surtout visibles la nuit). Les plus \
+                         proches de la caméra seulement (128), sans ombre.",
+                        "Lamps, neons and floodlights placed by the game on the map: they light the ground, \
+                         buildings and characters around them (mostly visible at night). Only the ones \
+                         closest to the camera (128), without shadows."
+                    ),
                 )
                 .changed();
             fog_changed |= ui
                 .add_enabled(
                     s.lamps,
-                    egui::Slider::new(&mut s.lamps_strength, 0.0..=4.0).text("force").custom_formatter(|v, _| format!("{v:.2}×")),
+                    egui::Slider::new(&mut s.lamps_strength, 0.0..=4.0).text(tr!("force", "strength")).custom_formatter(|v, _| format!("{v:.2}×")),
                 )
                 .changed();
         });
@@ -257,7 +282,7 @@ impl StudioApp {
             _ => None,
         };
         if let Some(k) = &sky {
-            self.status = format!("Ciel : {}", k.file);
+            self.status = trf!("Ciel : {}", "Sky: {}", k.file);
         }
         self.renderer.set_sky(sky.as_ref());
         if s.sun_follows {
@@ -293,12 +318,12 @@ impl StudioApp {
         let p = &mut self.particles;
         let auto = Kind::Auto.resolve(self.decor.applied.as_ref().map(|a| a.zone.as_str()));
         let label = |k: Kind| match (k, auto) {
-            (Kind::Auto, Some(a)) => format!("Auto : {}", a.label()),
-            (Kind::Auto, None) => "Auto (rien sur ce continent)".to_string(),
+            (Kind::Auto, Some(a)) => trf!("Auto : {}", "Auto: {}", a.label()),
+            (Kind::Auto, None) => tr!("Auto (rien sur ce continent)", "Auto (nothing on this continent)").to_string(),
             _ => k.label().to_string(),
         };
         ui.horizontal(|ui| {
-            ui.label("Particules");
+            ui.label(tr!("Particules", "Particles"));
             egui::ComboBox::from_id_salt("particules").selected_text(label(p.kind)).width(230.0).show_ui(ui, |ui| {
                 for k in Kind::ALL {
                     ui.selectable_value(&mut p.kind, k, label(k));
@@ -307,16 +332,23 @@ impl StudioApp {
         })
         .response
         .on_hover_text(
-            "Effets du jeu : feuilles qui tombent sur Hossin, vent de sable sur Indar, neige sur Esamir.              « Auto » prend celui du continent du décor. Elles suivent la timeline : lancez la lecture              pour les voir bouger ; l'export vidéo montre exactement les mêmes.",
+            tr!(
+                "Effets du jeu : feuilles qui tombent sur Hossin, vent de sable sur Indar, neige sur Esamir. \
+                 « Auto » prend celui du continent du décor. Elles suivent la timeline : lancez la lecture \
+                 pour les voir bouger ; l'export vidéo montre exactement les mêmes.",
+                "Game effects: falling leaves on Hossin, sandstorm on Indar, snow on Esamir. \
+                 “Auto” uses the one of the scenery's continent. They follow the timeline: start playback \
+                 to see them move; the video export shows exactly the same ones."
+            ),
         );
         let active = p.kind.resolve(self.decor.applied.as_ref().map(|a| a.zone.as_str())).is_some();
         ui.add_enabled_ui(active, |ui| {
-            ui.add(egui::Slider::new(&mut p.density, 0.0..=4.0).text("densité").custom_formatter(|v, _| format!("{v:.2}×")));
-            ui.add(egui::Slider::new(&mut p.wind, 0.0..=4.0).text("vent").custom_formatter(|v, _| format!("{v:.2}×")))
-                .on_hover_text("Force du vent (1× : celle de l'effet ; 0 : air calme, les flocons tombent droit)");
-            ui.add(egui::Slider::new(&mut p.wind_dir, 0.0..=360.0).step_by(5.0).text("direction du vent").suffix("°"))
-                .on_hover_text("Direction vers laquelle souffle le vent, dans le plan du sol (0° : +X, 90° : +Z)");
-            ui.add(egui::Slider::new(&mut p.size, 0.25..=4.0).logarithmic(true).text("taille").custom_formatter(|v, _| format!("{v:.2}×")));
+            ui.add(egui::Slider::new(&mut p.density, 0.0..=4.0).text(tr!("densité", "density")).custom_formatter(|v, _| format!("{v:.2}×")));
+            ui.add(egui::Slider::new(&mut p.wind, 0.0..=4.0).text(tr!("vent", "wind")).custom_formatter(|v, _| format!("{v:.2}×")))
+                .on_hover_text(tr!("Force du vent (1× : celle de l'effet ; 0 : air calme, les flocons tombent droit)", "Wind strength (1×: the effect's own; 0: still air, flakes fall straight)"));
+            ui.add(egui::Slider::new(&mut p.wind_dir, 0.0..=360.0).step_by(5.0).text(tr!("direction du vent", "wind direction")).suffix("°"))
+                .on_hover_text(tr!("Direction vers laquelle souffle le vent, dans le plan du sol (0° : +X, 90° : +Z)", "Direction the wind blows toward, in the ground plane (0°: +X, 90°: +Z)"));
+            ui.add(egui::Slider::new(&mut p.size, 0.25..=4.0).logarithmic(true).text(tr!("taille", "size")).custom_formatter(|v, _| format!("{v:.2}×")));
         });
         if self.particles != before {
             self.force_render = true;
@@ -333,10 +365,11 @@ impl StudioApp {
         let Some(a) = self.decor.applied.as_mut().filter(|a| a.zone == d.zone && a.center == d.center) else { return };
         a.ground = Some(ground);
         self.renderer.set_decor_ground(ground);
-        self.decor.info = match self.decor.info.rsplit_once("sol à ") {
+        let at = tr!("sol à ", "ground at ");
+        self.decor.info = match self.decor.info.rsplit_once(at) {
             Some((head, tail)) => {
-                let rest = tail.find(" ;").map(|i| &tail[i..]).unwrap_or("");
-                format!("{head}sol à {ground:.2} m{rest}")
+                let rest = tail.find(" m").map_or("", |i| &tail[i + 2..]);
+                format!("{head}{at}{ground:.2} m{rest}")
             }
             None => self.decor.info.clone(),
         };
@@ -381,27 +414,27 @@ impl StudioApp {
         }
         if self.game.is_none() {
             self.decor.open = false;
-            self.status = "Ouvrez d'abord le dossier du jeu".into();
+            self.status = tr!("Ouvrez d'abord le dossier du jeu", "Open the game folder first").into();
             return;
         }
         self.ensure_overview(ctx);
         let mut open = true;
         let mut load = false;
-        egui::Window::new("🗺 Décor d'une carte").open(&mut open).resizable(false).show(ctx, |ui| {
+        egui::Window::new(tr!("🗺 Décor d'une carte", "🗺 Map scenery")).id(egui::Id::new("decor_window")).open(&mut open).resizable(false).show(ctx, |ui| {
             ui.label(
                 egui::RichText::new(
-                    "Bâtiments, props, rochers et végétation placés par le jeu. Cliquez sur la carte pour \
-                     choisir le lieu : il devient l'origine de la scène (là où sont les personnages).",
+                    tr!("Bâtiments, props, rochers et végétation placés par le jeu. Cliquez sur la carte pour \
+                     choisir le lieu : il devient l'origine de la scène (là où sont les personnages).", "Buildings, props, rocks and vegetation placed by the game. Click the map to choose the place: it becomes the origin of the scene (where the characters are)."),
                 )
                 .small()
                 .weak(),
             );
             ui.horizontal(|ui| {
-                ui.label("Carte");
-                let label = ZONES.iter().find(|z| z.0 == self.decor.draft.zone).map(|z| z.1).unwrap_or("?");
+                ui.label(tr!("Carte", "Map"));
+                let label = ZONES.iter().find(|z| z.0 == self.decor.draft.zone).map_or("?", |z| crate::decor::zone_label(z.1));
                 egui::ComboBox::from_id_salt("decor_zone").selected_text(label).show_ui(ui, |ui| {
                     for (k, l) in ZONES {
-                        if ui.selectable_label(self.decor.draft.zone == *k, *l).clicked() && self.decor.draft.zone != *k {
+                        if ui.selectable_label(self.decor.draft.zone == *k, crate::decor::zone_label(l)).clicked() && self.decor.draft.zone != *k {
                             self.decor.draft.zone = k.to_string();
                             self.decor.draft.center = [0.0, 0.0];
                             self.decor.ground_auto = true;
@@ -415,7 +448,7 @@ impl StudioApp {
             });
             self.overview_widget(ui);
             ui.horizontal(|ui| {
-                ui.label("Lieu (x, z du jeu)");
+                ui.label(tr!("Lieu (x, z du jeu)", "Place (game x, z)"));
                 let a = ui.add(crate::calc::drag(&mut self.decor.draft.center[0]).speed(1.0).suffix(" m"));
                 let b = ui.add(crate::calc::drag(&mut self.decor.draft.center[1]).speed(1.0).suffix(" m"));
                 if a.changed() || b.changed() {
@@ -424,30 +457,44 @@ impl StudioApp {
                 }
             });
             ui.horizontal(|ui| {
-                ui.label("Rayon");
+                ui.label(tr!("Rayon", "Radius"));
                 ui.add(egui::Slider::new(&mut self.decor.draft.radius, 30.0..=6000.0).suffix(" m").logarithmic(true))
                     .on_hover_text(
-                        "Les objets plus loin que ce rayon ne sont pas chargés. Au-delà de 1 km, \
-                         le chargement est plus long et prend plus de mémoire",
+                        tr!(
+                            "Les objets plus loin que ce rayon ne sont pas chargés. Au-delà de 1 km, \
+                             le chargement est plus long et prend plus de mémoire",
+                            "Objects farther than this radius are not loaded. Beyond 1 km, \
+                             loading takes longer and uses more memory"
+                        ),
                     );
-                ui.checkbox(&mut self.decor.draft.flora, "Végétation");
+                ui.checkbox(&mut self.decor.draft.flora, tr!("Végétation", "Vegetation"));
                 ui.checkbox(&mut self.decor.draft.terrain, "Terrain").on_hover_text(
-                    "Relief et sol du jeu : détaillé (un point tous les 2 m) dans le rayon, jusqu'à 1 km, \
-                     plus grossier (8 m) au-delà jusqu'à l'horizon, à 2,5 km (ou le rayon + 1 km)",
+                    tr!(
+                        "Relief et sol du jeu : détaillé (un point tous les 2 m) dans le rayon, jusqu'à 1 km, \
+                         plus grossier (8 m) au-delà jusqu'à l'horizon, à 2,5 km (ou le rayon + 1 km)",
+                        "The game's terrain: detailed (a point every 2 m) within the radius, up to 1 km, \
+                         coarser (8 m) beyond that up to the horizon, at 2.5 km (or the radius + 1 km)"
+                    ),
                 );
             });
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.decor.ground_auto, "Hauteur du sol automatique")
+                ui.checkbox(&mut self.decor.ground_auto, tr!("Hauteur du sol automatique", "Automatic ground height"))
                     .on_hover_text(
-                        "La hauteur du terrain au lieu choisi (ou, sans terrain, celle estimée d'après les objets \
-                         posés autour) est ramenée à la grille, y = 0. Décochez pour la régler à la main, \
-                         par exemple pour placer les personnages sur un toit ou un pad. Sur le décor \
-                         déjà chargé à ce lieu, le réglage s'applique tout de suite.",
+                        tr!(
+                            "La hauteur du terrain au lieu choisi (ou, sans terrain, celle estimée d'après les objets \
+                             posés autour) est ramenée à la grille, y = 0. Décochez pour la régler à la main, \
+                             par exemple pour placer les personnages sur un toit ou un pad. Sur le décor \
+                             déjà chargé à ce lieu, le réglage s'applique tout de suite.",
+                            "The terrain height at the chosen place (or, without terrain, the one estimated from the \
+                             objects around) is brought to the grid, y = 0. Uncheck to set it by hand, \
+                             for example to put characters on a roof or a pad. On scenery already loaded \
+                             at this place, the setting applies right away."
+                        ),
                     );
                 let mut g = self.decor.draft.ground.unwrap_or(0.0);
                 let r = ui
                     .add_enabled(!self.decor.ground_auto, crate::calc::drag(&mut g).speed(0.05).fixed_decimals(2).suffix(" m"))
-                    .on_hover_text("Altitude du jeu placée sur la grille (y = 0) ; glisser ou taper une valeur");
+                    .on_hover_text(tr!("Altitude du jeu placée sur la grille (y = 0) ; glisser ou taper une valeur", "Game altitude placed on the grid (y = 0); drag or type a value"));
                 if r.changed() {
                     self.decor.draft.ground = Some(g);
                     self.lift_decor(g);
@@ -456,7 +503,7 @@ impl StudioApp {
             ui.separator();
             ui.horizontal(|ui| {
                 let busy = self.decor.loading;
-                if ui.add_enabled(!busy, egui::Button::new("Charger le décor")).clicked() {
+                if ui.add_enabled(!busy, egui::Button::new(tr!("Charger le décor", "Load scenery"))).clicked() {
                     load = true;
                 }
                 if busy {
@@ -466,7 +513,7 @@ impl StudioApp {
                     ui.add(egui::ProgressBar::new(p as f32 / total as f32).desired_width(160.0).show_percentage());
                     ui.ctx().request_repaint_after(std::time::Duration::from_millis(150));
                 }
-                if ui.add_enabled(self.decor.applied.is_some(), egui::Button::new("Retirer")).clicked() {
+                if ui.add_enabled(self.decor.applied.is_some(), egui::Button::new(tr!("Retirer", "Remove"))).clicked() {
                     self.clear_decor();
                 }
             });

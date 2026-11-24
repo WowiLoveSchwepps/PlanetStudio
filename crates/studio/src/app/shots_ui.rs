@@ -41,8 +41,8 @@ impl StudioApp {
     /// Bouton de la barre de la vue qui ouvre la fenêtre.
     pub(super) fn shots_button(&mut self, ui: &mut egui::Ui) {
         if ui
-            .selectable_label(self.shots_open, "🎞 Caméra prédéfinie")
-            .on_hover_text("Tour à 360°, arc, spirale, travelling… autour du personnage sélectionné")
+            .selectable_label(self.shots_open, tr!("🎞 Caméra prédéfinie", "🎞 Preset camera"))
+            .on_hover_text(tr!("Tour à 360°, arc, spirale, travelling… autour du personnage sélectionné", "360° orbit, arc, spiral, dolly… around the selected character"))
             .clicked()
         {
             self.shots_open = !self.shots_open;
@@ -77,7 +77,7 @@ impl StudioApp {
         let mut cancel = false;
         let mut clear = false;
         let mut play = false;
-        egui::Window::new("🎞 Caméra prédéfinie")
+        egui::Window::new(tr!("🎞 Caméra prédéfinie", "🎞 Preset camera"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -86,22 +86,22 @@ impl StudioApp {
                 let s = &mut self.config.shots;
 
                 // ---- 1. personnage
-                step(ui, "1", "Personnage filmé");
+                step(ui, "1", tr!("Personnage filmé", "Filmed character"));
                 match &subject_name {
                     Some(name) => ui.label(RichText::new(format!("🎯 {name}")).strong()),
                     None => ui.label(
-                        RichText::new("Aucun : cliquez sur le personnage à filmer (dans la vue ou dans la liste Scène).")
+                        RichText::new(tr!("Aucun : cliquez sur le personnage à filmer (dans la vue ou dans la liste Scène).", "None: click the character to film (in the viewport or in the Scene list)."))
                             .color(WARN),
                     ),
                 };
                 ui.add_space(8.0);
 
                 // ---- 2. mouvement
-                step(ui, "2", "Mouvement de la caméra");
+                step(ui, "2", tr!("Mouvement de la caméra", "Camera move"));
                 egui::Grid::new("shot_moves").num_columns(2).spacing([6.0, 4.0]).show(ui, |ui| {
                     let mut i = 0;
                     for choice in Move::ALL.into_iter().map(Some).chain([None]) {
-                        let label = choice.map_or("📍 Plan fixe (sans mouvement)", Move::label);
+                        let label = choice.map_or(tr!("📍 Plan fixe (sans mouvement)", "📍 Static shot (no move)"), Move::label);
                         if ui.add_sized([175.0, 24.0], egui::SelectableLabel::new(s.choice == choice, label)).clicked() {
                             s.choice = choice;
                         }
@@ -111,27 +111,27 @@ impl StudioApp {
                         }
                     }
                 });
-                let hint = s.choice.map_or("La caméra se place devant le personnage et ne bouge pas.", Move::hint);
+                let hint = s.choice.map_or(tr!("La caméra se place devant le personnage et ne bouge pas.", "The camera goes in front of the character and stays still."), Move::hint);
                 ui.label(RichText::new(hint).weak().italics());
                 ui.add_space(8.0);
 
                 // ---- 3. réglages
-                step(ui, "3", "Réglages");
+                step(ui, "3", tr!("Réglages", "Settings"));
                 let rotates = matches!(s.choice, Some(Move::Orbit360 | Move::Orbit180 | Move::Arc90 | Move::Spiral));
                 egui::Grid::new("shot_settings").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                    ui.label("Cadrage");
+                    ui.label(tr!("Cadrage", "Framing"));
                     combo(ui, "shot_framing", &mut s.framing, &Framing::ALL, |f| f.label());
                     ui.end_row();
-                    ui.label("Champ de vision");
+                    ui.label(tr!("Champ de vision", "Field of view"));
                     ui.horizontal(|ui| {
                         if ui
-                            .selectable_label(!s.fov_manual, format!("caméra ({cam_fov:.0}°)"))
-                            .on_hover_text("Garde le champ de vision actuel de la caméra de prise")
+                            .selectable_label(!s.fov_manual, trf!("caméra ({cam_fov:.0}°)", "camera ({cam_fov:.0}°)"))
+                            .on_hover_text(tr!("Garde le champ de vision actuel de la caméra de prise", "Keeps the shot camera's current field of view"))
                             .clicked()
                         {
                             s.fov_manual = false;
                         }
-                        if ui.selectable_label(s.fov_manual, "réglé").on_hover_text("Champ de vision propre au plan").clicked() && !s.fov_manual {
+                        if ui.selectable_label(s.fov_manual, tr!("réglé", "set")).on_hover_text(tr!("Champ de vision propre au plan", "Field of view specific to this shot")).clicked() && !s.fov_manual {
                             s.fov_manual = true;
                             s.fov_deg = cam_fov.round().clamp(shots::MIN_FOV, shots::MAX_FOV);
                         }
@@ -143,7 +143,7 @@ impl StudioApp {
                                     .suffix("°")
                                     .max_decimals(1),
                             )
-                            .on_hover_text("Petit : téléobjectif, fond rapproché.  Grand : grand-angle, perspective accentuée.");
+                            .on_hover_text(tr!("Petit : téléobjectif, fond rapproché.  Grand : grand-angle, perspective accentuée.", "Small: telephoto, compressed background.  Large: wide angle, stronger perspective."));
                         }
                     });
                     ui.end_row();
@@ -153,14 +153,14 @@ impl StudioApp {
                         let auto_text = auto.map_or("auto".to_string(), |d| format!("auto ({})", meters(d)));
                         if ui
                             .selectable_label(!s.dist_manual, auto_text)
-                            .on_hover_text("La distance qui donne le cadrage choisi avec ce champ de vision")
+                            .on_hover_text(tr!("La distance qui donne le cadrage choisi avec ce champ de vision", "The distance that gives the chosen framing with this field of view"))
                             .clicked()
                         {
                             s.dist_manual = false;
                         }
                         if ui
-                            .selectable_label(s.dist_manual, "réglée")
-                            .on_hover_text("Distance fixe entre la caméra et le point visé du personnage")
+                            .selectable_label(s.dist_manual, tr!("réglée", "set"))
+                            .on_hover_text(tr!("Distance fixe entre la caméra et le point visé du personnage", "Fixed distance between the camera and the character's target point"))
                             .clicked()
                             && !s.dist_manual
                         {
@@ -177,54 +177,58 @@ impl StudioApp {
                                     .suffix(" m")
                                     .max_decimals(2),
                             )
-                            .on_hover_text("Mètres entre la caméra et le point visé (travelling : distance au plus près)");
+                            .on_hover_text(tr!("Mètres entre la caméra et le point visé (travelling : distance au plus près)", "Meters between the camera and the target point (dolly: closest distance)"));
                         }
                     });
                     ui.end_row();
-                    ui.label("Hauteur");
+                    ui.label(tr!("Hauteur", "Height"));
                     combo(ui, "shot_height", &mut s.height, &Height::ALL, |h| h.label());
                     ui.end_row();
-                    ui.label(if rotates { "Départ" } else { "Côté" });
+                    ui.label(if rotates { tr!("Départ", "Start side") } else { tr!("Côté", "Side") });
                     combo(ui, "shot_side", &mut s.side, &Side::ALL, |c| c.label());
                     ui.end_row();
                     if rotates {
-                        ui.label("Sens");
+                        ui.label(tr!("Sens", "Direction"));
                         ui.horizontal(|ui| {
-                            ui.selectable_value(&mut s.clockwise, false, "↺ vers la gauche");
-                            ui.selectable_value(&mut s.clockwise, true, "↻ vers la droite");
+                            ui.selectable_value(&mut s.clockwise, false, tr!("↺ vers la gauche", "↺ to the left"));
+                            ui.selectable_value(&mut s.clockwise, true, tr!("↻ vers la droite", "↻ to the right"));
                         });
                         ui.end_row();
                     }
-                    ui.label("Début");
+                    ui.label(tr!("Début", "Start"));
                     ui.horizontal(|ui| {
-                        ui.add(crate::calc::drag(&mut start).range(t0..=i32::MAX).prefix("image "))
-                            .on_hover_text("Image où le plan commence");
+                        ui.add(crate::calc::drag(&mut start).range(t0..=i32::MAX).prefix(tr!("image ", "frame ")))
+                            .on_hover_text(tr!("Image où le plan commence", "Frame where the shot starts"));
                         if start != cur
-                            && ui.small_button("= tête de lecture").on_hover_text(format!("Commencer à l'image {cur}")).clicked()
+                            && ui.small_button(tr!("= tête de lecture", "= playhead")).on_hover_text(trf!("Commencer à l'image {cur}", "Start at frame {cur}")).clicked()
                         {
                             start = cur;
                         }
                     });
                     ui.end_row();
                     if s.choice.is_some() {
-                        ui.label("Durée");
+                        ui.label(tr!("Durée", "Duration"));
                         ui.add(egui::Slider::new(&mut s.secs, 1.0..=60.0).logarithmic(true).suffix(" s").max_decimals(1));
                         ui.end_row();
-                        ui.label("Vitesse");
+                        ui.label(tr!("Vitesse", "Speed"));
                         ui.horizontal(|ui| {
-                            ui.selectable_value(&mut s.ease, true, "douce")
-                                .on_hover_text("Démarre et s'arrête doucement");
-                            ui.selectable_value(&mut s.ease, false, "constante")
-                                .on_hover_text("Même vitesse du début à la fin : idéal pour une vidéo qui boucle");
+                            ui.selectable_value(&mut s.ease, true, tr!("douce", "eased"))
+                                .on_hover_text(tr!("Démarre et s'arrête doucement", "Starts and stops smoothly"));
+                            ui.selectable_value(&mut s.ease, false, tr!("constante", "constant"))
+                                .on_hover_text(tr!("Même vitesse du début à la fin : idéal pour une vidéo qui boucle", "Same speed from start to end: ideal for a looping video"));
                         });
                         ui.end_row();
                     }
                 });
                 if s.choice.is_some() {
-                    ui.checkbox(&mut s.follow, "Suivre le personnage s'il bouge (danse, marche)");
-                    ui.checkbox(&mut s.replace, "Effacer les anciennes clés de caméra").on_hover_text(
-                        "Décoché : le mouvement est ajouté à partir de l'image courante, \
-                         les clés de caméra avant et après sont gardées.",
+                    ui.checkbox(&mut s.follow, tr!("Suivre le personnage s'il bouge (danse, marche)", "Follow the character if it moves (dance, walk)"));
+                    ui.checkbox(&mut s.replace, tr!("Effacer les anciennes clés de caméra", "Erase the old camera keys")).on_hover_text(
+                        tr!(
+                            "Décoché : le mouvement est ajouté à partir de l'image courante, \
+                             les clés de caméra avant et après sont gardées.",
+                            "Unchecked: the move is added from the current frame, \
+                             camera keys before and after are kept."
+                        ),
                     );
                 }
                 ui.add_space(8.0);
@@ -243,25 +247,26 @@ impl StudioApp {
                 ui.horizontal(|ui| {
                     let can_play = preview_end.is_some();
                     if ui
-                        .add_enabled(can_play, egui::Button::new("▶ Lire l'aperçu"))
-                        .on_hover_text("Passe en vue Prise et lit le plan depuis son début")
-                        .on_disabled_hover_text("Aperçu en pause : changez un réglage pour le relancer")
+                        .add_enabled(can_play, egui::Button::new(tr!("▶ Lire l'aperçu", "▶ Play preview")))
+                        .on_hover_text(tr!("Passe en vue Prise et lit le plan depuis son début", "Switches to Shot view and plays the shot from its start"))
+                        .on_disabled_hover_text(tr!("Aperçu en pause : changez un réglage pour le relancer", "Preview paused: change a setting to restart it"))
                         .clicked()
                     {
                         play = true;
                     }
                     let note = match preview_end {
-                        Some(_) => "👁 Aperçu en direct dans la caméra de prise (rien n'est écrit avant OK)",
-                        None if subject_name.is_some() => "⏸ Aperçu en pause : la caméra a été déplacée à la main",
+                        Some(_) => tr!("👁 Aperçu en direct dans la caméra de prise (rien n'est écrit avant OK)", "👁 Live preview in the shot camera (nothing is written before OK)"),
+                        None if subject_name.is_some() => tr!("⏸ Aperçu en pause : la caméra a été déplacée à la main", "⏸ Preview paused: the camera was moved by hand"),
                         None => "",
                     };
                     ui.label(RichText::new(note).small().weak());
                 });
                 if let Some(end) = preview_end.filter(|e| *e > timeline_end) {
                     ui.label(
-                        RichText::new(format!(
+                        RichText::new(trf!(
                             "Le plan finit à l'image {end}, après la fin de la timeline ({timeline_end}) : \
-                             OK l'allongera ; l'aperçu s'arrête à {timeline_end}."
+                             OK l'allongera ; l'aperçu s'arrête à {timeline_end}.",
+                "The shot ends at frame {end}, after the end of the timeline ({timeline_end}): OK will extend it; the preview stops at {timeline_end}."
                         ))
                         .small()
                         .color(WARN),
@@ -276,13 +281,13 @@ impl StudioApp {
                         .min_size(egui::vec2(110.0, 28.0));
                     if ui
                         .add_enabled(subject_name.is_some(), ok)
-                        .on_hover_text("Crée les clés de la caméra de prise")
-                        .on_disabled_hover_text("Sélectionnez d'abord le personnage à filmer")
+                        .on_hover_text(tr!("Crée les clés de la caméra de prise", "Creates the shot camera keys"))
+                        .on_disabled_hover_text(tr!("Sélectionnez d'abord le personnage à filmer", "First select the character to film"))
                         .clicked()
                     {
                         apply = true;
                     }
-                    if ui.add(egui::Button::new("Annuler").min_size(egui::vec2(90.0, 28.0))).clicked() {
+                    if ui.add(egui::Button::new(tr!("Annuler", "Cancel")).min_size(egui::vec2(90.0, 28.0))).clicked() {
                         cancel = true;
                     }
                 });
@@ -292,14 +297,14 @@ impl StudioApp {
                 ui.separator();
                 let n = self.scene.camera.keys.len();
                 let label = if n == 0 {
-                    "🗑 Effacer toutes les clés de caméra".to_string()
+                    tr!("🗑 Effacer toutes les clés de caméra", "🗑 Erase all camera keys").to_string()
                 } else {
-                    format!("🗑 Effacer toutes les clés de caméra ({n})")
+                    trf!("🗑 Effacer toutes les clés de caméra ({n})", "🗑 Erase all camera keys ({n})")
                 };
                 if ui
                     .add_enabled(n > 0, egui::Button::new(label))
-                    .on_hover_text("La caméra de prise ne bouge plus : elle reste là où elle est à l'image courante. Ctrl+Z pour annuler.")
-                    .on_disabled_hover_text("La caméra de prise n'a aucune clé")
+                    .on_hover_text(tr!("La caméra de prise ne bouge plus : elle reste là où elle est à l'image courante. Ctrl+Z pour annuler.", "The shot camera stops moving: it stays where it is on the current frame. Ctrl+Z to undo."))
+                    .on_disabled_hover_text(tr!("La caméra de prise n'a aucune clé", "The shot camera has no keys"))
                     .clicked()
                 {
                     clear = true;
@@ -409,7 +414,7 @@ impl StudioApp {
     /// Crée un plan (mouvement animé, ou cadrage fixe si `mv` est `None`) sur la caméra de prise.
     fn make_shot(&mut self, mv: Option<Move>) {
         let Some(id) = self.shot_subject_id() else {
-            self.status = "Sélectionnez d'abord le personnage à filmer.".into();
+            self.status = tr!("Sélectionnez d'abord le personnage à filmer.", "First select the character to film.").into();
             return;
         };
         if self.cam_rec.is_some() {
@@ -430,15 +435,20 @@ impl StudioApp {
         self.editing = false;
         self.end = self.end.max(end);
         self.status = match mv {
-            None => format!(
+            None => trf!(
                 "Caméra de prise placée à l'image {start} : {}, {}, {} (Ctrl+Z pour annuler)",
+                "Shot camera placed at frame {start}: {}, {}, {} (Ctrl+Z to undo)",
                 s.framing.label(),
                 s.height.label(),
                 s.side.label()
             ),
             Some(mv) => {
                 let play = self.config.keymap.label(crate::keymap::Action::PlayPause);
-                format!("{} créé de l'image {start} à {end} — {play} pour le voir (Ctrl+Z pour annuler)", plain(mv.label()))
+                trf!(
+                    "{} créé de l'image {start} à {end} — {play} pour le voir (Ctrl+Z pour annuler)",
+                    "{} created from frame {start} to {end} — {play} to watch it (Ctrl+Z to undo)",
+                    plain(mv.label())
+                )
             }
         };
         self.shot_view = true;
@@ -463,19 +473,20 @@ fn plain(label: &str) -> &str {
 /// Distance lisible : « 4,2 m ».
 fn meters(d: f32) -> String {
     let decimals = if d < 10.0 { 1 } else { 0 };
-    format!("{d:.decimals$} m").replace('.', ",")
+    format!("{d:.decimals$} m").replace('.', tr!(",", "."))
 }
 
 /// Ce que fera « OK », en une phrase.
 fn summary(s: &ShotSettings, who: Option<&str>, start: i32, fps: f32, has_keys: bool, fov: f32, dist: Option<f32>) -> String {
-    let who = who.unwrap_or("(personnage à choisir)");
+    let who = who.unwrap_or(tr!("(personnage à choisir)", "(character to choose)"));
     let lens = match dist {
-        Some(d) => format!("\nChamp de vision {fov:.0}°, à {} du personnage.", meters(d)),
-        None => format!("\nChamp de vision {fov:.0}°."),
+        Some(d) => trf!("\nChamp de vision {fov:.0}°, à {} du personnage.", "\nField of view {fov:.0}°, {} from the character.", meters(d)),
+        None => trf!("\nChamp de vision {fov:.0}°.", "\nField of view {fov:.0}°."),
     };
     let text = match s.choice {
-        None => format!(
+        None => trf!(
             "Avec OK : la caméra de prise se place sur {who} ({}, {}, {}) à l'image {start}.",
+            "With OK: the shot camera goes onto {who} ({}, {}, {}) at frame {start}.",
             s.framing.label().to_lowercase(),
             s.height.label().to_lowercase(),
             s.side.label().to_lowercase()
@@ -485,13 +496,15 @@ fn summary(s: &ShotSettings, who: Option<&str>, start: i32, fps: f32, has_keys: 
             let erase = if !has_keys {
                 ""
             } else if s.replace {
-                "\nLes anciennes clés de caméra seront effacées."
+                tr!("\nLes anciennes clés de caméra seront effacées.", "\nThe old camera keys will be erased.")
             } else {
-                "\nLes clés de caméra hors de ces images sont gardées."
+                tr!("\nLes clés de caméra hors de ces images sont gardées.", "\nCamera keys outside these frames are kept.")
             };
-            format!(
+            trf!(
                 "Avec OK : {} autour de {who}, en {:.1} s, de l'image {start} à {end}. \
                  Ensuite, Espace pour le voir.{erase}",
+                "With OK: {} around {who}, over {:.1} s, from frame {start} to {end}. \
+                 Then press Space to watch it.{erase}",
                 plain(mv.label()).to_lowercase(),
                 s.secs
             )

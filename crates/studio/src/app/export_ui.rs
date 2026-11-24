@@ -40,9 +40,9 @@ impl RangeMode {
     const ALL: [RangeMode; 3] = [RangeMode::Full, RangeMode::InOut, RangeMode::Custom];
     fn label(self) -> &'static str {
         match self {
-            RangeMode::Full => "Plage entière (timeline)",
-            RangeMode::InOut => "Entrée / Sortie",
-            RangeMode::Custom => "Personnalisée",
+            RangeMode::Full => tr!("Plage entière (timeline)", "Full range (timeline)"),
+            RangeMode::InOut => tr!("Entrée / Sortie", "In / Out"),
+            RangeMode::Custom => tr!("Personnalisée", "Custom"),
         }
     }
 }
@@ -172,6 +172,21 @@ impl Default for ImageSettings {
     }
 }
 
+/// Nom affiché d'un format de `SHOT_FORMATS`.
+fn shot_format_name(name: &'static str) -> &'static str {
+    if !crate::i18n::en() {
+        return name;
+    }
+    match name {
+        "Ultra-large 21:9" => "Ultrawide 21:9",
+        "Ultra-large 21:9 (3440)" => "Ultrawide 21:9 (3440)",
+        "Cinéma 2,39:1" => "Cinema 2.39:1",
+        "Carré 1:1" => "Square 1:1",
+        "A4 paysage (√2:1)" => "A4 landscape (√2:1)",
+        n => n,
+    }
+}
+
 /// Formats de prise de vue de la caméra (cadre de la vue « Prise », taille ×1 des exports).
 const SHOT_FORMATS: &[(&str, u32, u32)] = &[
     ("HD 720p 16:9", 1280, 720),
@@ -202,7 +217,7 @@ fn scaled((cw, ch): (u32, u32), scale: f32) -> (u32, u32) {
 
 fn scale_label(f: f32) -> String {
     if (f - 1.0).abs() < 1e-4 {
-        "×1, format de la caméra".into()
+        tr!("×1, format de la caméra", "×1, camera format").into()
     } else if f.fract().abs() < 1e-4 {
         format!("×{}", f.round() as u32)
     } else {
@@ -392,7 +407,7 @@ impl ExportState {
                 self.pick_encoder = true;
             }
             Ok(Err(e)) => self.download_error = Some(format!("{e:#}")),
-            Err(_) => self.download_error = Some("le téléchargement a planté".into()),
+            Err(_) => self.download_error = Some(tr!("le téléchargement a planté", "the download crashed").into()),
         }
     }
 
@@ -400,14 +415,14 @@ impl ExportState {
     /// télécharger (seulement s'il est introuvable).
     fn ffmpeg_status_ui(&mut self, ui: &mut egui::Ui) {
         if self.ffmpeg_searching() {
-            hint(ui, "Recherche de ffmpeg et des encodeurs de la carte graphique…");
+            hint(ui, tr!("Recherche de ffmpeg et des encodeurs de la carte graphique…", "Looking for ffmpeg and the graphics card's encoders…"));
             return;
         }
         if let Some(f) = self.ffmpeg() {
             let (version, exe) = (f.version.clone(), f.exe.display().to_string());
             ui.horizontal(|ui| {
-                hint(ui, &format!("ffmpeg {version} trouvé."));
-                if ui.small_button("↻").on_hover_text(format!("{exe}\nChercher de nouveau")).clicked() {
+                hint(ui, &trf!("ffmpeg {version} trouvé.", "ffmpeg {version} found."));
+                if ui.small_button("↻").on_hover_text(trf!("{exe}\nChercher de nouveau", "{exe}\nSearch again")).clicked() {
                     self.ffmpeg = FfmpegState::NotSearched;
                 }
             });
@@ -418,14 +433,14 @@ impl ExportState {
         if let Some((p, _)) = &self.download {
             let got = p.bytes.load(Ordering::Relaxed);
             let text = match p.stage.load(Ordering::Relaxed) {
-                0 => format!("Téléchargement de ffmpeg : {} / {} Mo", mo(got), mo(pkg.size)),
-                1 => "Vérification de l'archive…".into(),
-                _ => "Installation…".into(),
+                0 => trf!("Téléchargement de ffmpeg : {} / {} Mo", "Downloading ffmpeg: {} / {} MB", mo(got), mo(pkg.size)),
+                1 => tr!("Vérification de l'archive…", "Checking the archive…").into(),
+                _ => tr!("Installation…", "Installing…").into(),
             };
             let cancel = ui
                 .horizontal(|ui| {
                     ui.add(egui::ProgressBar::new(got as f32 / pkg.size as f32).text(text).desired_width(330.0));
-                    ui.small_button("Annuler").clicked()
+                    ui.small_button(tr!("Annuler", "Cancel")).clicked()
                 })
                 .inner;
             if cancel {
@@ -433,26 +448,27 @@ impl ExportState {
             }
             return;
         }
-        hint(ui, "ffmpeg introuvable : l'encodage par la carte graphique (bien plus rapide) n'est pas disponible.");
+        hint(ui, tr!("ffmpeg introuvable : l'encodage par la carte graphique (bien plus rapide) n'est pas disponible.", "ffmpeg not found: encoding on the graphics card (much faster) is not available."));
         let mut rescan = false;
         ui.horizontal(|ui| {
-            let label = format!("⬇ Télécharger ffmpeg {} ({} Mo)", pkg.version, mo(pkg.size));
-            let tip = format!(
+            let label = trf!("⬇ Télécharger ffmpeg {} ({} Mo)", "⬇ Download ffmpeg {} ({} MB)", pkg.version, mo(pkg.size));
+            let tip = trf!(
                 "Source : {}\nVérifié par son empreinte SHA-256, puis installé pour votre compte seulement :\n{}\n\
                  ffmpeg est un logiciel libre distinct (licence GPL), sa licence est copiée à côté.",
+                "Source: {}\nVerified by its SHA-256 checksum, then installed for your account only:\n{}\nffmpeg is separate free software (GPL license); its license is copied next to it.",
                 pkg.source,
                 ffmpeg::install_dir().map(|d| d.display().to_string()).unwrap_or_default()
             );
             if ui.button(label).on_hover_text(tip).clicked() {
                 self.start_ffmpeg_download();
             }
-            rescan = ui.small_button("↻").on_hover_text("Chercher de nouveau (ffmpeg installé à la main)").clicked();
+            rescan = ui.small_button("↻").on_hover_text(tr!("Chercher de nouveau (ffmpeg installé à la main)", "Search again (ffmpeg installed by hand)")).clicked();
         });
         if rescan {
             self.ffmpeg = FfmpegState::NotSearched;
         }
         if let Some(e) = &self.download_error {
-            ui.colored_label(Color32::from_rgb(240, 110, 90), format!("Échec : {e}"));
+            ui.colored_label(Color32::from_rgb(240, 110, 90), trf!("Échec : {e}", "Failed: {e}"));
         }
     }
 }
@@ -460,16 +476,16 @@ impl ExportState {
 // ------------------------------------------------------------------ outils
 
 fn fr_num(v: f64, decimals: usize) -> String {
-    format!("{v:.decimals$}").replace('.', ",")
+    format!("{v:.decimals$}").replace('.', tr!(",", "."))
 }
 
 fn fmt_bytes(b: f64) -> String {
     if b >= 1e9 {
-        format!("{} Go", fr_num(b / 1e9, 2))
+        format!("{} {}", fr_num(b / 1e9, 2), tr!("Go", "GB"))
     } else if b >= 1e6 {
-        format!("{} Mo", fr_num(b / 1e6, 1))
+        format!("{} {}", fr_num(b / 1e6, 1), tr!("Mo", "MB"))
     } else {
-        format!("{} Ko", fr_num(b / 1e3, 0))
+        format!("{} {}", fr_num(b / 1e3, 0), tr!("Ko", "KB"))
     }
 }
 
@@ -573,18 +589,18 @@ pub(super) fn shot_format_ui(ui: &mut egui::Ui, format: [u32; 2], lock: &mut boo
     let current = SHOT_FORMATS.iter().find(|p| p.1 == w && p.2 == h);
     let mut presets = |ui: &mut egui::Ui| {
         for &(name, pw, ph) in SHOT_FORMATS {
-            if ui.selectable_label(w == pw && h == ph, format!("{name}  —  {pw} × {ph}")).clicked() {
+            if ui.selectable_label(w == pw && h == ph, format!("{}  —  {pw} × {ph}", shot_format_name(name))).clicked() {
                 w = pw;
                 h = ph;
             }
         }
     };
     if compact {
-        let text = current.map(|p| format!("{}  —  {} × {}", p.0, p.1, p.2)).unwrap_or_else(|| "Personnalisé".into());
+        let text = current.map(|p| format!("{}  —  {} × {}", shot_format_name(p.0), p.1, p.2)).unwrap_or_else(|| tr!("Personnalisé", "Custom").into());
         egui::ComboBox::from_id_salt("shot_format_preset").selected_text(text).width(280.0).show_ui(ui, |ui| {
             presets(ui);
             ui.separator();
-            let _ = ui.selectable_label(current.is_none(), "Personnalisé (largeur × hauteur ci-dessous)");
+            let _ = ui.selectable_label(current.is_none(), tr!("Personnalisé (largeur × hauteur ci-dessous)", "Custom (width × height below)"));
         });
     } else {
         presets(ui);
@@ -592,10 +608,10 @@ pub(super) fn shot_format_ui(ui: &mut egui::Ui, format: [u32; 2], lock: &mut boo
     }
     ui.horizontal(|ui| {
         let aspect = w as f64 / h.max(1) as f64;
-        let rw = ui.add(crate::calc::drag(&mut w).range(16..=MAX_W).suffix(" px").speed(4.0)).on_hover_text("Largeur");
+        let rw = ui.add(crate::calc::drag(&mut w).range(16..=MAX_W).suffix(" px").speed(4.0)).on_hover_text(tr!("Largeur", "Width"));
         let link = if *lock { "🔗" } else { "⛓" };
-        ui.toggle_value(lock, link).on_hover_text("Garder les proportions");
-        let rh = ui.add(crate::calc::drag(&mut h).range(16..=MAX_H).suffix(" px").speed(4.0)).on_hover_text("Hauteur");
+        ui.toggle_value(lock, link).on_hover_text(tr!("Garder les proportions", "Keep proportions"));
+        let rh = ui.add(crate::calc::drag(&mut h).range(16..=MAX_H).suffix(" px").speed(4.0)).on_hover_text(tr!("Hauteur", "Height"));
         if *lock && rw.changed() {
             h = ((w as f64 / aspect).round() as u32).clamp(16, MAX_H);
         } else if *lock && rh.changed() {
@@ -610,9 +626,9 @@ pub(super) fn shot_format_ui(ui: &mut egui::Ui, format: [u32; 2], lock: &mut boo
 fn scale_ui(ui: &mut egui::Ui, id: &str, cam: (u32, u32), scale: &mut f32) -> bool {
     let mut changed = false;
     let (w, h) = scaled(cam, *scale);
-    ui.label("Taille");
+    ui.label(tr!("Taille", "Size"));
     let preset = SCALES.iter().any(|f| (f - *scale).abs() < 1e-4);
-    let text = if preset { format!("{}  —  {w} × {h}", scale_label(*scale)) } else { format!("Personnalisée  —  {w} × {h}") };
+    let text = if preset { format!("{}  —  {w} × {h}", scale_label(*scale)) } else { trf!("Personnalisée  —  {w} × {h}", "Custom  —  {w} × {h}") };
     egui::ComboBox::from_id_salt((id, "scale")).selected_text(text).width(250.0).show_ui(ui, |ui| {
         for &f in SCALES {
             let (fw, fh) = scaled(cam, f);
@@ -623,12 +639,12 @@ fn scale_ui(ui: &mut egui::Ui, id: &str, cam: (u32, u32), scale: &mut f32) -> bo
         }
     });
     ui.end_row();
-    ui.label("Largeur");
+    ui.label(tr!("Largeur", "Width"));
     ui.horizontal(|ui| {
         let mut nw = w;
         if ui
             .add(crate::calc::drag(&mut nw).range(16..=MAX_W).suffix(" px").speed(4.0))
-            .on_hover_text("La hauteur suit les proportions de la caméra de prise")
+            .on_hover_text(tr!("La hauteur suit les proportions de la caméra de prise", "The height follows the shot camera's proportions"))
             .changed()
         {
             *scale = nw as f32 / cam.0 as f32;
@@ -740,24 +756,24 @@ impl StudioApp {
         let mut e = Vec::new();
         if let Some(c) = v.format.codec() {
             if !c.fits(w, h) {
-                e.push("H.264 s'arrête à 3840 × 2160 (4K) : choisissez AV1 pour une vidéo plus grande.".into());
+                e.push(tr!("H.264 s'arrête à 3840 × 2160 (4K) : choisissez AV1 pour une vidéo plus grande.", "H.264 stops at 3840 × 2160 (4K): choose AV1 for a larger video.").into());
             }
             if v.encoder != Backend::Builtin {
                 if self.export.ffmpeg_searching() {
-                    e.push("Recherche de ffmpeg en cours…".into());
+                    e.push(tr!("Recherche de ffmpeg en cours…", "Looking for ffmpeg…").into());
                 } else if !self.export.ffmpeg().is_some_and(|f| f.has(c, v.encoder)) {
-                    e.push(format!("Encodeur « {} » indisponible sur cette machine.", v.encoder.label(c)));
+                    e.push(trf!("Encodeur « {} » indisponible sur cette machine.", "Encoder “{}” is not available on this machine.", v.encoder.label(c)));
                 }
             }
         }
         if v.format == VideoFormat::Gif && (w > 65535 || h > 65535) {
-            e.push("GIF : 65 535 pixels de côté au plus.".into());
+            e.push(tr!("GIF : 65 535 pixels de côté au plus.", "GIF: 65,535 pixels per side at most.").into());
         }
         if v.range == RangeMode::Custom && v.custom.1 < v.custom.0 {
-            e.push("La fin de la plage doit être après son début.".into());
+            e.push(tr!("La fin de la plage doit être après son début.", "The end of the range must be after its start.").into());
         }
         if self.config.export.dir.trim().is_empty() {
-            e.push("Choisissez un dossier de sortie.".into());
+            e.push(tr!("Choisissez un dossier de sortie.", "Choose an output folder.").into());
         }
         e
     }
@@ -788,7 +804,7 @@ impl StudioApp {
         let mut open = true;
         let before = self.config.export.clone();
         let busy = self.export.busy();
-        egui::Window::new("Exporter")
+        egui::Window::new(tr!("Exporter", "Export"))
             .id(egui::Id::new("export_window"))
             .open(&mut open)
             .collapsible(false)
@@ -798,7 +814,7 @@ impl StudioApp {
                     let tab = &mut self.config.export.tab;
                     let message = &mut self.export.message;
                     ui.add_enabled_ui(!busy, |ui| {
-                        for (t, label) in [(ExportTab::Video, "🎬  Vidéo"), (ExportTab::Image, "🖼  Image")] {
+                        for (t, label) in [(ExportTab::Video, tr!("🎬  Vidéo", "🎬  Video")), (ExportTab::Image, "🖼  Image")] {
                             let text = egui::RichText::new(label).size(15.0);
                             if ui.add(egui::Button::new(text).selected(*tab == t).min_size(Vec2::new(110.0, 28.0))).clicked() && *tab != t {
                                 *tab = t;
@@ -807,7 +823,7 @@ impl StudioApp {
                         }
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new("Rendu par la caméra de prise 🎥, jamais par la caméra de travail").weak());
+                        ui.label(egui::RichText::new(tr!("Rendu par la caméra de prise 🎥, jamais par la caméra de travail", "Rendered by the shot camera 🎥, never by the work camera")).weak());
                     });
                 });
                 ui.separator();
@@ -865,7 +881,7 @@ impl StudioApp {
     /// Section « Caméra de prise » : son format fixe les proportions de toutes les images.
     fn shot_section(&mut self, ui: &mut egui::Ui) {
         let (w, h) = self.shot_format();
-        let title = format!("Caméra de prise  —  {w} × {h} ({})", ratio_label(w, h));
+        let title = trf!("Caméra de prise  —  {w} × {h} ({})", "Shot camera  —  {w} × {h} ({})", ratio_label(w, h));
         egui::CollapsingHeader::new(egui::RichText::new(title).strong().size(14.0))
             .id_salt("export_section_shot")
             .default_open(false)
@@ -874,8 +890,8 @@ impl StudioApp {
                 self.shot_format_editor(ui, true);
                 hint(
                     ui,
-                    "Format de prise de vue du projet : le cadre de la vue « Prise » et les proportions \
-                     des vidéos et des photos. Aussi dans la barre d'outils (🎥 Prise).",
+                    tr!("Format de prise de vue du projet : le cadre de la vue « Prise » et les proportions \
+                     des vidéos et des photos. Aussi dans la barre d'outils (🎥 Prise).", "The project's shot format: the frame of the “Shot” view and the proportions of videos and photos. Also in the toolbar (🎥 Shot)."),
                 );
                 ui.add_space(4.0);
             });
@@ -918,7 +934,7 @@ impl StudioApp {
                 }
                 ui.end_row();
                 if v.format == VideoFormat::Sequence {
-                    ui.label("Images");
+                    ui.label(tr!("Images", "Frames"));
                     egui::ComboBox::from_id_salt("v_seq_format").selected_text(v.seq_format.label()).width(250.0).show_ui(ui, |ui| {
                         for f in ImageFormat::ALL {
                             ui.selectable_value(&mut v.seq_format, f, f.label()).on_hover_text(f.hint());
@@ -926,7 +942,7 @@ impl StudioApp {
                     });
                     ui.end_row();
                     if v.seq_format.has_quality() {
-                        ui.label("Qualité JPEG");
+                        ui.label(tr!("Qualité JPEG", "JPEG quality"));
                         ui.add(egui::Slider::new(&mut v.seq_quality, 1..=100));
                         ui.end_row();
                     }
@@ -935,12 +951,12 @@ impl StudioApp {
             hint(ui, v.format.hint());
         });
 
-        section(ui, "Sortie", true, |ui| {
+        section(ui, tr!("Sortie", "Output"), true, |ui| {
             egui::Grid::new("v_out").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                ui.label("Dossier");
+                ui.label(tr!("Dossier", "Folder"));
                 ui.add(egui::TextEdit::singleline(&mut self.config.export.dir).desired_width(290.0));
                 ui.end_row();
-                ui.label(if v.format == VideoFormat::Sequence { "Préfixe" } else { "Nom du fichier" });
+                ui.label(if v.format == VideoFormat::Sequence { tr!("Préfixe", "Prefix") } else { tr!("Nom du fichier", "File name") });
                 ui.horizontal(|ui| {
                     ui.add(egui::TextEdit::singleline(&mut v.name).desired_width(200.0));
                     let ext = match v.format {
@@ -953,19 +969,19 @@ impl StudioApp {
             });
         });
 
-        section(ui, "Vidéo", true, |ui| {
+        section(ui, tr!("Vidéo", "Video"), true, |ui| {
             egui::Grid::new("v_video").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 if scale_ui(ui, "v_size", cam, &mut v.scale) {
                     v.recommend(scaled(cam, v.scale), rate.fps());
                 }
-                ui.label("Images/s");
+                ui.label(tr!("Images/s", "Frames/s"));
                 let text = match v.rate {
-                    None => format!("Projet ({})", project_rate.label()),
+                    None => trf!("Projet ({})", "Project ({})", project_rate.label()),
                     Some(r) => r.label(),
                 };
                 let old_rate = v.rate;
                 egui::ComboBox::from_id_salt("v_rate").selected_text(text).width(140.0).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut v.rate, None, format!("Projet ({})", project_rate.label()));
+                    ui.selectable_value(&mut v.rate, None, trf!("Projet ({})", "Project ({})", project_rate.label()));
                     ui.separator();
                     for r in FrameRate::PRESETS {
                         ui.selectable_value(&mut v.rate, Some(r), r.label());
@@ -976,7 +992,7 @@ impl StudioApp {
                 }
                 ui.end_row();
                 if let Some(c) = v.format.codec() {
-                    ui.label("Encodage");
+                    ui.label(tr!("Encodage", "Encoding"));
                     egui::ComboBox::from_id_salt("v_speed").selected_text(v.speed.label()).width(140.0).show_ui(ui, |ui| {
                         for s in Speed::ALL {
                             ui.selectable_value(&mut v.speed, s, s.label());
@@ -984,11 +1000,11 @@ impl StudioApp {
                     })
                     .response
                     .on_hover_text(match c {
-                        Codec::H264 => "Effort de compression : « Lente » donne une image un peu meilleure au même débit",
-                        Codec::Av1 => "Effort de compression : l'AV1 « Lente » peut être très long en 4K et 8K",
+                        Codec::H264 => tr!("Effort de compression : « Lente » donne une image un peu meilleure au même débit", "Compression effort: “Slow” gives a slightly better picture at the same bitrate"),
+                        Codec::Av1 => tr!("Effort de compression : l'AV1 « Lente » peut être très long en 4K et 8K", "Compression effort: “Slow” AV1 can take very long in 4K and 8K"),
                     });
                     ui.end_row();
-                    ui.label("Encodeur");
+                    ui.label(tr!("Encodeur", "Encoder"));
                     egui::ComboBox::from_id_salt("v_encoder").selected_text(v.encoder.label(c)).width(250.0).show_ui(ui, |ui| {
                         ui.selectable_value(&mut v.encoder, Backend::Builtin, Backend::Builtin.label(c))
                             .on_hover_text(Backend::Builtin.hint());
@@ -1007,13 +1023,13 @@ impl StudioApp {
             if v.format.codec().is_some() {
                 export.ffmpeg_status_ui(ui);
                 if v.encoder != Backend::Builtin && v.mode == RateMode::Vbr2 && !v.encoder.true_two_pass() {
-                    hint(ui, "VBR 2 passes sur la carte graphique : l'analyse se fait pendant l'encodage, sans second passage.");
+                    hint(ui, tr!("VBR 2 passes sur la carte graphique : l'analyse se fait pendant l'encodage, sans second passage.", "2-pass VBR on the graphics card: the analysis happens during encoding, without a second run."));
                 }
             }
             let size = scaled(cam, v.scale);
             if v.format.codec() == Some(Codec::H264) && !Codec::H264.fits(size.0, size.1) {
-                ui.colored_label(Color32::from_rgb(240, 110, 90), "H.264 : 3840 × 2160 au maximum.");
-                if ui.button("Passer en AV1 (jusqu'à 8K)").clicked() {
+                ui.colored_label(Color32::from_rgb(240, 110, 90), tr!("H.264 : 3840 × 2160 au maximum.", "H.264: 3840 × 2160 at most."));
+                if ui.button(tr!("Passer en AV1 (jusqu'à 8K)", "Switch to AV1 (up to 8K)")).clicked() {
                     v.format = VideoFormat::Av1;
                     if !Codec::Av1.supports(v.mode) {
                         v.mode = RateMode::Vbr1;
@@ -1022,13 +1038,14 @@ impl StudioApp {
                 }
             }
             if v.format == VideoFormat::Gif && rate.fps() > 50.0 {
-                hint(ui, "GIF : 50 images/s au plus ; au-delà, les navigateurs ralentissent l'animation.");
+                hint(ui, tr!("GIF : 50 images/s au plus ; au-delà, les navigateurs ralentissent l'animation.", "GIF: 50 fps at most; above that, browsers slow the animation down."));
             }
             if (rate.fps() - fps_project as f64).abs() > 1e-3 {
                 hint(
                     ui,
-                    &format!(
+                    &trf!(
                         "Le projet est à {} images/s : l'animation est rééchantillonnée ({} images exportées), sa durée ne change pas.",
+                        "The project runs at {} fps: the animation is resampled ({} frames exported), its duration does not change.",
                         project_rate.label(),
                         count
                     ),
@@ -1037,22 +1054,22 @@ impl StudioApp {
         });
 
         if let Some(codec) = v.format.codec() {
-            section(ui, "Débit", true, |ui| {
+            section(ui, tr!("Débit", "Bitrate"), true, |ui| {
                 egui::Grid::new("v_rate_grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                    ui.label("Encodage du débit");
+                    ui.label(tr!("Encodage du débit", "Rate control"));
                     egui::ComboBox::from_id_salt("v_mode").selected_text(v.mode.label()).width(200.0).show_ui(ui, |ui| {
                         for m in RateMode::ALL {
                             let ok = codec.supports(m);
                             ui.add_enabled_ui(ok, |ui| {
                                 ui.selectable_value(&mut v.mode, m, m.label())
                                     .on_hover_text(m.hint())
-                                    .on_disabled_hover_text("L'encodeur AV1 ne fait pas de débit constant");
+                                    .on_disabled_hover_text(tr!("L'encodeur AV1 ne fait pas de débit constant", "The AV1 encoder does not do constant bitrate"));
                             });
                         }
                     });
                     ui.end_row();
                     if v.mode.uses_bitrate() {
-                        ui.label("Débit cible");
+                        ui.label(tr!("Débit cible", "Target bitrate"));
                         ui.horizontal(|ui| {
                             ui.add(
                                 egui::Slider::new(&mut v.target_mbps, 0.5..=codec.max_mbps())
@@ -1064,18 +1081,18 @@ impl StudioApp {
                         ui.end_row();
                         let vbr = matches!(v.mode, RateMode::Vbr1 | RateMode::Vbr2);
                         if vbr && codec.supports_max_bitrate() {
-                            ui.label("Débit maximal");
+                            ui.label(tr!("Débit maximal", "Maximum bitrate"));
                             ui.add(
                                 egui::Slider::new(&mut v.max_mbps, v.target_mbps..=codec.max_mbps())
                                     .logarithmic(true)
                                     .suffix(" Mbit/s")
                                     .max_decimals(1),
                             )
-                            .on_hover_text("Plafond des passages les plus complexes");
+                            .on_hover_text(tr!("Plafond des passages les plus complexes", "Ceiling for the most complex scenes"));
                             ui.end_row();
                         }
                         ui.label("");
-                        if ui.small_button("Débits conseillés").on_hover_text("Selon la taille, la fréquence et le codec").clicked() {
+                        if ui.small_button(tr!("Débits conseillés", "Recommended bitrates")).on_hover_text(tr!("Selon la taille, la fréquence et le codec", "Based on size, frame rate and codec")).clicked() {
                             v.recommend(scaled(cam, v.scale), rate.fps());
                         }
                         ui.end_row();
@@ -1086,22 +1103,22 @@ impl StudioApp {
                             Codec::H264 => &mut v.crf_h264,
                             Codec::Av1 => &mut v.crf_av1,
                         };
-                        ui.add(egui::Slider::new(crf, lo..=hi)).on_hover_text("Plus bas = meilleure qualité, fichier plus lourd");
+                        ui.add(egui::Slider::new(crf, lo..=hi)).on_hover_text(tr!("Plus bas = meilleure qualité, fichier plus lourd", "Lower = better quality, larger file"));
                         ui.end_row();
                         let c = *crf as f32 / hi as f32;
                         let word = if c <= 0.34 {
-                            "excellente (fichier lourd)"
+                            tr!("excellente (fichier lourd)", "excellent (large file)")
                         } else if c <= 0.45 {
-                            "très bonne"
+                            tr!("très bonne", "very good")
                         } else if c <= 0.56 {
-                            "bonne"
+                            tr!("bonne", "good")
                         } else if c <= 0.7 {
-                            "moyenne"
+                            tr!("moyenne", "average")
                         } else {
-                            "faible (fichier léger)"
+                            tr!("faible (fichier léger)", "low (small file)")
                         };
                         ui.label("");
-                        ui.label(egui::RichText::new(format!("Qualité {word}")).weak());
+                        ui.label(egui::RichText::new(trf!("Qualité {word}", "Quality: {word}")).weak());
                         ui.end_row();
                     }
                 });
@@ -1110,14 +1127,14 @@ impl StudioApp {
                 }
                 hint(ui, v.mode.hint());
                 if v.mode.uses_bitrate() && codec == Codec::Av1 && v.mode != RateMode::Crf {
-                    hint(ui, "AV1 : le débit est une moyenne, sans plafond.");
+                    hint(ui, tr!("AV1 : le débit est une moyenne, sans plafond.", "AV1: the bitrate is an average, with no ceiling."));
                 }
             });
         }
 
-        section(ui, "Plage", true, |ui| {
+        section(ui, tr!("Plage", "Range"), true, |ui| {
             egui::Grid::new("v_range").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                ui.label("Exporter");
+                ui.label(tr!("Exporter", "Export"));
                 egui::ComboBox::from_id_salt("v_range_combo").selected_text(v.range.label()).width(200.0).show_ui(ui, |ui| {
                     for r in RangeMode::ALL {
                         ui.selectable_value(&mut v.range, r, r.label());
@@ -1127,23 +1144,23 @@ impl StudioApp {
                 match v.range {
                     RangeMode::Full => {
                         ui.label("");
-                        ui.label(egui::RichText::new(format!("Images {t0} à {t1} de la timeline")).weak());
+                        ui.label(egui::RichText::new(trf!("Images {t0} à {t1} de la timeline", "Frames {t0} to {t1} of the timeline")).weak());
                         ui.end_row();
                     }
                     RangeMode::InOut => {
                         ui.label("");
                         match marks {
-                            Some((a, b)) => ui.label(egui::RichText::new(format!("Entrée {a}  ·  Sortie {b}")).weak()),
-                            None => ui.label(egui::RichText::new("Aucun repère : toute la timeline").weak()),
+                            Some((a, b)) => ui.label(egui::RichText::new(trf!("Entrée {a}  ·  Sortie {b}", "In {a}  ·  Out {b}")).weak()),
+                            None => ui.label(egui::RichText::new(tr!("Aucun repère : toute la timeline", "No marks: the whole timeline")).weak()),
                         };
                         ui.end_row();
                     }
                     RangeMode::Custom => {
-                        ui.label("Images");
+                        ui.label(tr!("Images", "Frames"));
                         ui.horizontal(|ui| {
-                            ui.add(crate::calc::drag(&mut v.custom.0).prefix("de "));
+                            ui.add(crate::calc::drag(&mut v.custom.0).prefix(tr!("de ", "from ")));
                             let lo = v.custom.0;
-                            ui.add(crate::calc::drag(&mut v.custom.1).prefix("à ").range(lo..=i32::MAX));
+                            ui.add(crate::calc::drag(&mut v.custom.1).prefix(tr!("à ", "to ")).range(lo..=i32::MAX));
                             if ui.small_button("= timeline").clicked() {
                                 v.custom = (t0, t1);
                             }
@@ -1151,21 +1168,21 @@ impl StudioApp {
                         ui.end_row();
                     }
                 }
-                ui.label("Durée");
+                ui.label(tr!("Durée", "Duration"));
                 let secs = (r1 - r0 + 1).max(1) as f64 / fps_project.max(0.1) as f64;
                 let plural = if count > 1 { "s" } else { "" };
-                ui.label(format!("{} s  ·  {count} image{plural} à {} i/s", fr_num(secs, 2), rate.label()));
+                ui.label(trf!("{} s  ·  {count} image{plural} à {} i/s", "{} s  ·  {count} frame{plural} at {} fps", fr_num(secs, 2), rate.label()));
                 ui.end_row();
             });
             if v.range == RangeMode::InOut && marks.is_none() {
-                hint(ui, "Placez l'entrée et la sortie avec les boutons { Entrée et Sortie } sous l'aperçu, ou en glissant sur sa barre de temps.");
+                hint(ui, tr!("Placez l'entrée et la sortie avec les boutons { Entrée et Sortie } sous l'aperçu, ou en glissant sur sa barre de temps.", "Set the in and out points with the { In and Out } buttons under the preview, or by dragging on its time bar."));
             }
         });
 
         section(ui, "Options", true, |ui| {
-            ui.checkbox(&mut v.grid, "Afficher la grille au sol");
+            ui.checkbox(&mut v.grid, tr!("Afficher la grille au sol", "Show the ground grid"));
             if v.format == VideoFormat::Gif {
-                ui.checkbox(&mut v.gif_loop, "Lire en boucle");
+                ui.checkbox(&mut v.gif_loop, tr!("Lire en boucle", "Loop"));
             }
         });
 
@@ -1189,25 +1206,25 @@ impl StudioApp {
                 });
                 ui.end_row();
                 if i.format.has_quality() {
-                    ui.label("Qualité");
-                    ui.add(egui::Slider::new(&mut i.quality, 1..=100)).on_hover_text("90 et plus : pas de défaut visible");
+                    ui.label(tr!("Qualité", "Quality"));
+                    ui.add(egui::Slider::new(&mut i.quality, 1..=100)).on_hover_text(tr!("90 et plus : pas de défaut visible", "90 and above: no visible artifacts"));
                     ui.end_row();
                 }
             });
             hint(ui, i.format.hint());
             hint(
                 ui,
-                "RAW : format des appareils photo (données brutes du capteur), sans équivalent pour une image 3D. \
-                 Pour garder toute l'image sans perte, prenez TIFF ou PNG.",
+                tr!("RAW : format des appareils photo (données brutes du capteur), sans équivalent pour une image 3D. \
+                 Pour garder toute l'image sans perte, prenez TIFF ou PNG.", "RAW: a camera format (raw sensor data), with no equivalent for a 3D image. To keep the whole image lossless, choose TIFF or PNG."),
             );
         });
 
-        section(ui, "Sortie", true, |ui| {
+        section(ui, tr!("Sortie", "Output"), true, |ui| {
             egui::Grid::new("i_out").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                ui.label("Dossier");
+                ui.label(tr!("Dossier", "Folder"));
                 ui.add(egui::TextEdit::singleline(&mut self.config.export.dir).desired_width(290.0));
                 ui.end_row();
-                ui.label("Nom du fichier");
+                ui.label(tr!("Nom du fichier", "File name"));
                 ui.horizontal(|ui| {
                     ui.add(egui::TextEdit::singleline(&mut i.name).desired_width(200.0));
                     ui.label(egui::RichText::new(format!(".{}", i.format.ext())).weak());
@@ -1215,22 +1232,22 @@ impl StudioApp {
                 ui.end_row();
                 ui.label("");
                 let mut numbered = !i.overwrite;
-                ui.checkbox(&mut numbered, "Ne pas écraser : ajouter _001, _002…")
-                    .on_hover_text("Décoché : une image du même nom est remplacée");
+                ui.checkbox(&mut numbered, tr!("Ne pas écraser : ajouter _001, _002…", "Don't overwrite: add _001, _002…"))
+                    .on_hover_text(tr!("Décoché : une image du même nom est remplacée", "Unchecked: an image with the same name is replaced"));
                 i.overwrite = !numbered;
                 ui.end_row();
             });
         });
 
-        section(ui, "Taille", true, |ui| {
+        section(ui, tr!("Taille", "Size"), true, |ui| {
             egui::Grid::new("i_size").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 scale_ui(ui, "i_size", cam, &mut i.scale);
             });
         });
 
         section(ui, "Image", true, |ui| {
-            ui.label(format!("Image {frame} de la timeline : choisissez-la avec les commandes sous l'aperçu."));
-            ui.checkbox(&mut i.grid, "Afficher la grille au sol");
+            ui.label(trf!("Image {frame} de la timeline : choisissez-la avec les commandes sous l'aperçu.", "Frame {frame} of the timeline: pick it with the controls under the preview."));
+            ui.checkbox(&mut i.grid, tr!("Afficher la grille au sol", "Show the ground grid"));
         });
 
         self.post_section(ui, true);
@@ -1238,23 +1255,23 @@ impl StudioApp {
 
     /// Post-traitement (réglages du projet) et qualité du rendu des exports.
     fn post_section(&mut self, ui: &mut egui::Ui, open: bool) {
-        section(ui, "Post-traitement", open, |ui| {
+        section(ui, tr!("Post-traitement", "Post-processing"), open, |ui| {
             post_fx_controls(ui, &mut self.post_fx);
-            hint(ui, "Réglages du projet : la vue, les photos et les vidéos les partagent. L'aperçu les montre aussitôt.");
+            hint(ui, tr!("Réglages du projet : la vue, les photos et les vidéos les partagent. L'aperçu les montre aussitôt.", "Project settings: the viewport, photos and videos share them. The preview shows them right away."));
             ui.add_space(6.0);
-            ui.label(egui::RichText::new("Qualité du rendu").strong());
+            ui.label(egui::RichText::new(tr!("Qualité du rendu", "Render quality")).strong());
             let mut q = self.config.quality;
             let mut final_exports = !self.config.exports_like_view;
-            ui.checkbox(&mut final_exports, "« Rendu final » (sinon : qualité de la vue)")
-                .on_hover_text("Ombres, textures et effets au plus haut pour l'export, quelle que soit la qualité de la vue");
+            ui.checkbox(&mut final_exports, tr!("« Rendu final » (sinon : qualité de la vue)", "“Final render” (otherwise: viewport quality)"))
+                .on_hover_text(tr!("Ombres, textures et effets au plus haut pour l'export, quelle que soit la qualité de la vue", "Shadows, textures and effects at their highest for the export, whatever the viewport quality"));
             ui.horizontal(|ui| {
-                ui.label("Suréchantillonnage");
+                ui.label(tr!("Suréchantillonnage", "Supersampling"));
                 for n in 1..=4u32 {
                     ui.selectable_value(&mut q.supersample, n, format!("{n}×"));
                 }
             })
             .response
-            .on_hover_text("Rendu N fois plus grand puis réduit : contours et détails plus fins, export plus lent");
+            .on_hover_text(tr!("Rendu N fois plus grand puis réduit : contours et détails plus fins, export plus lent", "Rendered N times larger then scaled down: finer edges and details, slower export"));
             if q != self.config.quality || final_exports == self.config.exports_like_view {
                 self.config.quality = q;
                 self.config.exports_like_view = !final_exports;
@@ -1300,15 +1317,15 @@ impl StudioApp {
         painter.rect_stroke(img, 0.0, Stroke::new(1.0_f32, Color32::from_gray(70)), egui::StrokeKind::Outside);
         let info = if busy {
             let what = match self.export.current {
-                Some(k) => format!("Export en cours : image {} / {}", k + 1, self.export.count),
-                None => "Encodage en cours…".into(),
+                Some(k) => trf!("Export en cours : image {} / {}", "Exporting: frame {} / {}", k + 1, self.export.count),
+                None => tr!("Encodage en cours…", "Encoding…").into(),
             };
             match self.eta() {
-                Eta::Total(rest) => format!("{what}  ·  fin dans {}", fmt_dur(rest)),
+                Eta::Total(rest) => trf!("{what}  ·  fin dans {}", "{what}  ·  done in {}", fmt_dur(rest)),
                 _ => what,
             }
         } else {
-            format!("Aperçu  ·  {ow} × {oh}  ·  image {}", self.cur_frame())
+            trf!("Aperçu  ·  {ow} × {oh}  ·  image {}", "Preview  ·  {ow} × {oh}  ·  frame {}", self.cur_frame())
         };
         let galley_pos = img.min + Vec2::new(6.0, 6.0);
         let text_rect = painter.text(galley_pos, egui::Align2::LEFT_TOP, &info, egui::FontId::proportional(12.0), Color32::TRANSPARENT);
@@ -1467,7 +1484,7 @@ impl StudioApp {
         if !resp.is_pointer_button_down_on() && !resp.dragged() {
             self.export.drag = None;
         }
-        resp.on_hover_text("Cliquer ou glisser : se déplacer dans le temps.\nRepères jaunes : entrée et sortie, à glisser.");
+        resp.on_hover_text(tr!("Cliquer ou glisser : se déplacer dans le temps.\nRepères jaunes : entrée et sortie, à glisser.", "Click or drag: move through time.\nYellow marks: in and out points, draggable."));
     }
 
     /// Début, image précédente, lecture / pause, image suivante, fin ; repères d'entrée et de sortie.
@@ -1475,39 +1492,39 @@ impl StudioApp {
         let (a, b) = if video { self.export_range() } else { (self.start, self.end) };
         ui.horizontal(|ui| {
             let big = |t: &str| egui::Button::new(egui::RichText::new(t).size(16.0)).min_size(Vec2::new(34.0, 28.0));
-            if ui.add(big("⏮")).on_hover_text(if video { "Début de la plage exportée" } else { "Début" }).clicked() {
+            if ui.add(big("⏮")).on_hover_text(if video { tr!("Début de la plage exportée", "Start of the exported range") } else { tr!("Début", "Start") }).clicked() {
                 self.playing = false;
                 self.set_frame(a as f32);
             }
-            if ui.add(big("◀")).on_hover_text("Image précédente").clicked() {
+            if ui.add(big("◀")).on_hover_text(tr!("Image précédente", "Previous frame")).clicked() {
                 self.playing = false;
                 self.set_frame((self.cur_frame() - 1).max(self.start) as f32);
             }
-            let (icon, tip) = if self.playing { ("⏸", "Pause") } else { ("▶", "Lecture") };
+            let (icon, tip) = if self.playing { ("⏸", "Pause") } else { ("▶", tr!("Lecture", "Play")) };
             if ui.add(big(icon)).on_hover_text(tip).clicked() {
                 self.toggle_play();
             }
-            if ui.add(big("▶|")).on_hover_text("Image suivante").clicked() {
+            if ui.add(big("▶|")).on_hover_text(tr!("Image suivante", "Next frame")).clicked() {
                 self.playing = false;
                 self.set_frame((self.cur_frame() + 1).min(self.end) as f32);
             }
-            if ui.add(big("⏭")).on_hover_text(if video { "Fin de la plage exportée" } else { "Fin" }).clicked() {
+            if ui.add(big("⏭")).on_hover_text(if video { tr!("Fin de la plage exportée", "End of the exported range") } else { tr!("Fin", "End") }).clicked() {
                 self.playing = false;
                 self.set_frame(b as f32);
             }
             ui.separator();
             ui.label(egui::RichText::new(timecode(self.frame, self.fps)).monospace().size(14.0));
-            ui.label(egui::RichText::new(format!("image {}", self.cur_frame())).weak());
+            ui.label(egui::RichText::new(trf!("image {}", "frame {}", self.cur_frame())).weak());
             if video {
                 ui.separator();
                 let cur = self.cur_frame();
-                if ui.button("{  Entrée").on_hover_text("Placer l'entrée sur l'image courante").clicked() {
+                if ui.button(tr!("{  Entrée", "{  In")).on_hover_text(tr!("Placer l'entrée sur l'image courante", "Set the in point on the current frame")).clicked() {
                     self.mark_in(cur);
                 }
-                if ui.button("Sortie  }").on_hover_text("Placer la sortie sur l'image courante").clicked() {
+                if ui.button(tr!("Sortie  }", "Out  }")).on_hover_text(tr!("Placer la sortie sur l'image courante", "Set the out point on the current frame")).clicked() {
                     self.mark_out(cur);
                 }
-                if self.export.marks.is_some() && ui.small_button("✖").on_hover_text("Effacer les repères").clicked() {
+                if self.export.marks.is_some() && ui.small_button("✖").on_hover_text(tr!("Effacer les repères", "Clear the marks")).clicked() {
                     self.clear_in_out();
                 }
             }
@@ -1530,7 +1547,7 @@ impl StudioApp {
             let (file, what) = match v.format {
                 VideoFormat::Sequence => {
                     let base = export::clean_name(&v.name, &[], "image");
-                    (format!("{base}_00000.{} …", v.seq_format.ext()), format!("{} ({count} fichiers)", v.seq_format.label()))
+                    (format!("{base}_00000.{} …", v.seq_format.ext()), trf!("{} ({count} fichiers)", "{} ({count} files)", v.seq_format.label()))
                 }
                 f => {
                     let what = match f.codec() {
@@ -1541,7 +1558,7 @@ impl StudioApp {
                 }
             };
             let (w, h) = self.video_size();
-            let mut parts = vec![what, format!("{w} × {h}"), format!("{} i/s", rate.label())];
+            let mut parts = vec![what, format!("{w} × {h}"), trf!("{} i/s", "{} fps", rate.label())];
             if let Some(c) = v.format.codec() {
                 if v.mode.uses_bitrate() {
                     parts.push(format!("{} {} Mbit/s", v.mode.label().split(' ').next().unwrap_or(""), fr_num(v.target_mbps as f64, 1)));
@@ -1556,10 +1573,10 @@ impl StudioApp {
             let i = &self.config.export.image;
             let (w, h) = self.image_size();
             let base = export::clean_name(&i.name, &[i.format.ext()], "photo");
-            (format!("{base}.{}", i.format.ext()), format!("{}  ·  {w} × {h}  ·  image {}", i.format.label(), self.cur_frame()))
+            (format!("{base}.{}", i.format.ext()), trf!("{}  ·  {w} × {h}  ·  image {}", "{}  ·  {w} × {h}  ·  frame {}", i.format.label(), self.cur_frame()))
         };
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Fichier :").strong());
+            ui.label(egui::RichText::new(tr!("Fichier :", "File:")).strong());
             ui.label(egui::RichText::new(PathBuf::from(&dir).join(&summary.0).display().to_string()).monospace());
         });
         ui.label(egui::RichText::new(summary.1).weak());
@@ -1573,11 +1590,11 @@ impl StudioApp {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             if busy {
-                if ui.add(egui::Button::new("■  Arrêter").min_size(Vec2::new(120.0, 30.0))).clicked() {
+                if ui.add(egui::Button::new(tr!("■  Arrêter", "■  Stop")).min_size(Vec2::new(120.0, 30.0))).clicked() {
                     self.stop_export();
                 }
             } else {
-                let label = if video { "▶  Exporter" } else { "📸  Enregistrer l'image" };
+                let label = if video { tr!("▶  Exporter", "▶  Export") } else { tr!("📸  Enregistrer l'image", "📸  Save image") };
                 let btn = egui::Button::new(egui::RichText::new(label).strong().size(15.0).color(Color32::WHITE))
                     .fill(ui.visuals().selection.bg_fill)
                     .min_size(Vec2::new(190.0, 32.0));
@@ -1587,11 +1604,11 @@ impl StudioApp {
                     } else {
                         self.take_photo();
                         self.export.message = self.status.clone();
-                        self.export.error = self.status.starts_with("Erreur");
+                        self.export.error = self.status.starts_with(tr!("Erreur", "Error"));
                     }
                 }
                 if video {
-                    let add = egui::Button::new("➕ File d'attente").min_size(Vec2::new(0.0, 32.0));
+                    let add = egui::Button::new(tr!("➕ File d'attente", "➕ Queue")).min_size(Vec2::new(0.0, 32.0));
                     let tip = "Garde ce plan (caméra, animation, éclairage) avec ces réglages d'export : \
                                modifiez ensuite le projet et ajoutez-en d'autres, puis exportez toute la file";
                     if ui.add_enabled(errors.is_empty(), add).on_hover_text(tip).clicked() {
@@ -1599,15 +1616,15 @@ impl StudioApp {
                     }
                     let waiting = self.export.queue.iter().filter(|q| q.status == QueueStatus::Waiting).count();
                     if waiting > 0 {
-                        let run = egui::Button::new(egui::RichText::new(format!("⏭  Exporter la file ({waiting})")).strong())
+                        let run = egui::Button::new(egui::RichText::new(trf!("⏭  Exporter la file ({waiting})", "⏭  Export the queue ({waiting})")).strong())
                             .min_size(Vec2::new(0.0, 32.0));
-                        if ui.add(run).on_hover_text("Exporte les vidéos en attente l'une après l'autre").clicked() {
+                        if ui.add(run).on_hover_text(tr!("Exporte les vidéos en attente l'une après l'autre", "Exports the queued videos one after another")).clicked() {
                             self.queue_start();
                         }
                     }
                 }
             }
-            if ui.button("📂 Ouvrir le dossier").clicked() {
+            if ui.button(tr!("📂 Ouvrir le dossier", "📂 Open folder")).clicked() {
                 let _ = std::fs::create_dir_all(&dir);
                 let _ = std::process::Command::new("explorer").arg(&dir).spawn();
             }
@@ -1622,31 +1639,32 @@ impl StudioApp {
         let total = self.export.count.max(1);
         let elapsed = self.export.started.map(|t| t.elapsed().as_secs_f32()).unwrap_or(0.0);
         let rendered = self.export.current.unwrap_or(total);
-        ui.add(egui::ProgressBar::new(rendered as f32 / total as f32).text(format!("Rendu : image {rendered} / {total}")));
+        ui.add(egui::ProgressBar::new(rendered as f32 / total as f32).text(trf!("Rendu : image {rendered} / {total}", "Rendering: frame {rendered} / {total}")));
         if let Some(ex) = &self.export.exporter {
             let done = ex.progress.done.load(Ordering::Relaxed);
             let stage = ex.progress.stage.load(Ordering::Relaxed);
             let rate = if elapsed > 0.5 { done as f32 / elapsed } else { 0.0 };
             let what = match (self.export.format, stage) {
-                (Some(VideoFormat::Gif), _) => format!("GIF : image {done} / {total}"),
-                (Some(VideoFormat::Sequence), _) => format!("Écriture : image {done} / {total}"),
-                (_, 1) => format!("Mise de côté pour les 2 passes : {done} / {total}"),
-                (_, 2) => format!("Passe 1 / 2 (analyse) : {done} / {total}"),
-                (_, 3) => format!("Passe 2 / 2 (encodage) : {done} / {total}"),
-                _ => format!("Encodage : {done} / {total} ({} images/s)", fr_num(rate as f64, 1)),
+                (Some(VideoFormat::Gif), _) => trf!("GIF : image {done} / {total}", "GIF: frame {done} / {total}"),
+                (Some(VideoFormat::Sequence), _) => trf!("Écriture : image {done} / {total}", "Writing: frame {done} / {total}"),
+                (_, 1) => trf!("Mise de côté pour les 2 passes : {done} / {total}", "Staging for the 2 passes: {done} / {total}"),
+                (_, 2) => trf!("Passe 1 / 2 (analyse) : {done} / {total}", "Pass 1 / 2 (analysis): {done} / {total}"),
+                (_, 3) => trf!("Passe 2 / 2 (encodage) : {done} / {total}", "Pass 2 / 2 (encoding): {done} / {total}"),
+                _ => trf!("Encodage : {done} / {total} ({} images/s)", "Encoding: {done} / {total} ({} fps)", fr_num(rate as f64, 1)),
             };
             ui.add(egui::ProgressBar::new(done as f32 / total as f32).text(what));
         }
         let text = match self.eta() {
             Eta::Total(rest) => {
-                format!("⏱ Estimation : {} au total  ·  écoulé {}", fmt_dur(elapsed + rest), fmt_dur(elapsed))
+                trf!("⏱ Estimation : {} au total  ·  écoulé {}", "⏱ Estimate: {} in total  ·  elapsed {}", fmt_dur(elapsed + rest), fmt_dur(elapsed))
             }
-            Eta::RenderOnly(rest) => format!(
+            Eta::RenderOnly(rest) => trf!(
                 "⏱ Rendu terminé dans {}, puis 2 passes d'encodage (durée estimée dès la 1re passe)  ·  écoulé {}",
+                "⏱ Rendering done in {}, then 2 encoding passes (estimated once the 1st pass starts)  ·  elapsed {}",
                 fmt_dur(rest),
                 fmt_dur(elapsed)
             ),
-            Eta::Unknown => format!("⏱ Estimation en cours…  ·  écoulé {}", fmt_dur(elapsed)),
+            Eta::Unknown => trf!("⏱ Estimation en cours…  ·  écoulé {}", "⏱ Estimating…  ·  elapsed {}", fmt_dur(elapsed)),
         };
         ui.label(egui::RichText::new(text).strong());
         ui.ctx().request_repaint_after(Duration::from_millis(100));
@@ -1805,12 +1823,12 @@ impl StudioApp {
             Some(c) => format!("{} · {}", video.format.label(), video.encoder.short(c)),
             None => video.format.label().to_string(),
         };
-        let details = format!("{what}  ·  {w} × {h}  ·  {} i/s  ·  images {a} à {b} ({count})", rate.label());
+        let details = trf!("{what}  ·  {w} × {h}  ·  {} i/s  ·  images {a} à {b} ({count})", "{what}  ·  {w} × {h}  ·  {} fps  ·  frames {a} to {b} ({count})", rate.label());
         video.name = name;
         let state = self.capture_state();
         self.export.queue.push(QueueItem { file, details, state, video, dir, status: QueueStatus::Waiting });
         let waiting = self.export.queue.iter().filter(|q| q.status == QueueStatus::Waiting).count();
-        self.export.message = format!("Ajouté à la file d'attente ({waiting} en attente). Vous pouvez modifier le projet et en ajouter d'autres.");
+        self.export.message = trf!("Ajouté à la file d'attente ({waiting} en attente). Vous pouvez modifier le projet et en ajouter d'autres.", "Added to the queue ({waiting} waiting). You can change the project and add more.");
         self.export.error = false;
     }
 
@@ -1890,12 +1908,12 @@ impl StudioApp {
         let done = q.iter().filter(|q| matches!(q.status, QueueStatus::Done(_))).count();
         let failed = q.iter().filter(|q| matches!(q.status, QueueStatus::Failed(_))).count();
         let mut msg = if run.stop {
-            format!("File d'attente arrêtée après {} : {done} export(s) terminé(s)", fmt_dur(run.started.elapsed().as_secs_f32()))
+            trf!("File d'attente arrêtée après {} : {done} export(s) terminé(s)", "Queue stopped after {}: {done} export(s) finished", fmt_dur(run.started.elapsed().as_secs_f32()))
         } else {
-            format!("✔ File d'attente terminée en {} : {done} export(s)", fmt_dur(run.started.elapsed().as_secs_f32()))
+            trf!("✔ File d'attente terminée en {} : {done} export(s)", "✔ Queue finished in {}: {done} export(s)", fmt_dur(run.started.elapsed().as_secs_f32()))
         };
         if failed > 0 {
-            msg += &format!(", {failed} en échec");
+            msg += &trf!(", {failed} en échec", ", {failed} failed");
         }
         self.export.message = msg;
         self.export.error = failed > 0;
@@ -1940,20 +1958,20 @@ impl StudioApp {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(format!("{}.  {}", i + 1, q.file)).strong());
-                        if editable && q.status != QueueStatus::Running && ui.small_button("✖").on_hover_text("Retirer de la file").clicked() {
+                        if editable && q.status != QueueStatus::Running && ui.small_button("✖").on_hover_text(tr!("Retirer de la file", "Remove from the queue")).clicked() {
                             remove = Some(i);
                         }
                     });
                     ui.add(egui::Label::new(egui::RichText::new(&q.details).small().weak()).wrap());
                     match &q.status {
                         QueueStatus::Done(p) => {
-                            ui.add(egui::Label::new(egui::RichText::new(format!("Écrit : {p}")).small().weak()).wrap());
+                            ui.add(egui::Label::new(egui::RichText::new(trf!("Écrit : {p}", "Written: {p}")).small().weak()).wrap());
                         }
                         QueueStatus::Failed(e) => {
                             ui.add(egui::Label::new(egui::RichText::new(e).small().color(Color32::from_rgb(240, 110, 90))).wrap());
                         }
                         QueueStatus::Stopped => {
-                            ui.label(egui::RichText::new("Arrêté").small().weak());
+                            ui.label(egui::RichText::new(tr!("Arrêté", "Stopped")).small().weak());
                         }
                         _ => {}
                     }
@@ -1971,20 +1989,20 @@ impl StudioApp {
         if self.export.queue.is_empty() {
             return;
         }
-        section(ui, "File d'attente", true, |ui| {
+        section(ui, tr!("File d'attente", "Queue"), true, |ui| {
             hint(
                 ui,
-                "Chaque export garde le projet tel qu'il était à son ajout (caméra, animation, éclairage, \
-                 post-traitement) ; le décor (carte) reste celui du moment de l'export.",
+                tr!("Chaque export garde le projet tel qu'il était à son ajout (caméra, animation, éclairage, \
+                 post-traitement) ; le décor (carte) reste celui du moment de l'export.", "Each export keeps the project as it was when added (camera, animation, lighting, post-processing); the scenery (map) stays the one at export time."),
             );
             ui.add_space(2.0);
             self.queue_list_ui(ui, true);
             let finished = self.export.queue.iter().any(|q| !matches!(q.status, QueueStatus::Waiting | QueueStatus::Running));
             ui.horizontal(|ui| {
-                if finished && ui.small_button("Retirer les terminés").clicked() {
+                if finished && ui.small_button(tr!("Retirer les terminés", "Remove finished")).clicked() {
                     self.export.queue.retain(|q| q.status == QueueStatus::Waiting);
                 }
-                if ui.small_button("Tout retirer").clicked() {
+                if ui.small_button(tr!("Tout retirer", "Remove all")).clicked() {
                     self.export.queue.clear();
                 }
             });
@@ -1997,8 +2015,8 @@ impl StudioApp {
             ui.set_width(620.0);
             let n = self.export.queue.len();
             let k = self.export.queue_run.as_ref().and_then(|r| r.current).map_or(0, |i| i + 1);
-            ui.heading(format!("File d'attente : export {k} / {n}"));
-            ui.label(egui::RichText::new("Le projet est remis tel quel à la fin de la file.").weak());
+            ui.heading(trf!("File d'attente : export {k} / {n}", "Queue: export {k} / {n}"));
+            ui.label(egui::RichText::new(tr!("Le projet est remis tel quel à la fin de la file.", "The project is restored as it was at the end of the queue.")).weak());
             ui.separator();
             egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| self.queue_list_ui(ui, false));
             ui.separator();
@@ -2006,7 +2024,7 @@ impl StudioApp {
                 self.progress_ui(ui);
             }
             ui.add_space(4.0);
-            if ui.add(egui::Button::new("■  Arrêter la file").min_size(Vec2::new(150.0, 30.0))).clicked() {
+            if ui.add(egui::Button::new(tr!("■  Arrêter la file", "■  Stop the queue")).min_size(Vec2::new(150.0, 30.0))).clicked() {
                 self.queue_stop();
             }
         });
@@ -2024,7 +2042,7 @@ impl StudioApp {
         }
         let dir = PathBuf::from(self.config.export.dir.trim());
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            self.export.message = format!("Dossier invalide : {e}");
+            self.export.message = trf!("Dossier invalide : {e}", "Invalid folder: {e}");
             self.export.error = true;
             return;
         }
@@ -2056,7 +2074,7 @@ impl StudioApp {
                     (Backend::Builtin, _) => Job::Video { path, params },
                     (backend, Some(ff)) => Job::Ffmpeg { path, params, exe: ff.exe.clone(), backend },
                     (_, None) => {
-                        self.export.message = "ffmpeg introuvable".into();
+                        self.export.message = tr!("ffmpeg introuvable", "ffmpeg not found").into();
                         self.export.error = true;
                         return;
                     }
@@ -2078,7 +2096,7 @@ impl StudioApp {
         match Exporter::start(job) {
             Ok(ex) => self.export.exporter = Some(ex),
             Err(e) => {
-                self.export.message = format!("Erreur : {e:#}");
+                self.export.message = trf!("Erreur : {e:#}", "Error: {e:#}");
                 self.export.error = true;
                 return;
             }
@@ -2119,8 +2137,8 @@ impl StudioApp {
             // le fil termine ce qu'il a reçu : vidéo partielle, ou images déjà écrites
             ex.close_input();
             self.export.message = match self.export.format {
-                Some(VideoFormat::Sequence) => "Arrêté : les images déjà rendues sont écrites.".into(),
-                _ => "Arrêté : le fichier contiendra les images déjà rendues.".into(),
+                Some(VideoFormat::Sequence) => tr!("Arrêté : les images déjà rendues sont écrites.", "Stopped: the frames already rendered are written.").into(),
+                _ => tr!("Arrêté : le fichier contiendra les images déjà rendues.", "Stopped: the file will contain the frames already rendered.").into(),
             };
             self.export.error = false;
             std::thread::spawn(move || {
@@ -2163,10 +2181,10 @@ impl StudioApp {
                 self.export.error = r.is_err();
                 self.export.message = match (r, self.export.format) {
                     (Ok(p), Some(VideoFormat::Sequence)) => {
-                        format!("✔ {} images écrites en {secs:.0} s dans {}", self.export.count, p.display())
+                        trf!("✔ {} images écrites en {secs:.0} s dans {}", "✔ {} images written in {secs:.0} s to {}", self.export.count, p.display())
                     }
-                    (Ok(p), _) => format!("✔ Écrit en {secs:.0} s : {}", p.display()),
-                    (Err(e), _) => format!("Erreur d'écriture : {e:#}"),
+                    (Ok(p), _) => trf!("✔ Écrit en {secs:.0} s : {}", "✔ Written in {secs:.0} s: {}", p.display()),
+                    (Err(e), _) => trf!("Erreur d'écriture : {e:#}", "Error while writing: {e:#}"),
                 };
                 self.status = self.export.message.clone();
             } else if self.export.exporter.is_some() {
@@ -2212,7 +2230,7 @@ impl StudioApp {
             if let Some(ex) = self.export.exporter.as_mut() {
                 ex.close_input();
             }
-            self.export.message = if self.export.two_pass { "Encodage en deux passes…".into() } else { "Finalisation…".into() };
+            self.export.message = if self.export.two_pass { tr!("Encodage en deux passes…", "Two-pass encoding…").into() } else { tr!("Finalisation…", "Finishing…").into() };
         } else {
             self.export.current = Some(k + 1);
         }
@@ -2223,8 +2241,8 @@ impl StudioApp {
     fn fail_export(&mut self, e: anyhow::Error) {
         // l'erreur du fil d'écriture est plus parlante que « l'export s'est arrêté »
         let msg = match self.export.exporter.take().map(|ex| ex.finish()) {
-            Some(Err(inner)) => format!("Erreur : {inner:#}"),
-            _ => format!("Erreur : {e:#}"),
+            Some(Err(inner)) => trf!("Erreur : {inner:#}", "Error: {inner:#}"),
+            _ => trf!("Erreur : {e:#}", "Error: {e:#}"),
         };
         self.export.message = msg;
         self.export.error = true;
@@ -2237,7 +2255,7 @@ impl StudioApp {
     /// Photo : l'image courante vue par la caméra de prise, avec les réglages de l'onglet Image.
     pub(super) fn take_photo(&mut self) {
         if self.export.busy() {
-            self.status = "Un export est en cours : photo impossible pour l'instant".into();
+            self.status = tr!("Un export est en cours : photo impossible pour l'instant", "An export is running: no photo for now").into();
             return;
         }
         let i = self.config.export.image.clone();
@@ -2263,8 +2281,8 @@ impl StudioApp {
             Ok(path)
         })();
         self.status = match r {
-            Ok(p) => format!("📸 Photo {w}×{h} enregistrée : {}", p.display()),
-            Err(e) => format!("Erreur de photo : {e:#}"),
+            Ok(p) => trf!("📸 Photo {w}×{h} enregistrée : {}", "📸 {w}×{h} photo saved: {}", p.display()),
+            Err(e) => trf!("Erreur de photo : {e:#}", "Error taking photo: {e:#}"),
         };
     }
 }

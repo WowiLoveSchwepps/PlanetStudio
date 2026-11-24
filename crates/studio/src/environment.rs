@@ -48,14 +48,14 @@ impl Ambiance {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Studio => "Studio (éclairage fixe)",
+            Self::Studio => tr!("Studio (éclairage fixe)", "Studio (fixed lighting)"),
             Self::Indar => "Indar (canyons)",
-            Self::IndarHighlands => "Indar (savane)",
+            Self::IndarHighlands => tr!("Indar (savane)", "Indar (savanna)"),
             Self::Amerish => "Amerish",
             Self::Esamir => "Esamir",
             Self::Nexus => "Nexus",
-            Self::BlueDome => "Dôme ciel bleu",
-            Self::Outdoor => "Extérieur par défaut",
+            Self::BlueDome => tr!("Dôme ciel bleu", "Blue sky dome"),
+            Self::Outdoor => tr!("Extérieur par défaut", "Default outdoor"),
         }
     }
 
@@ -143,6 +143,20 @@ pub const SUN_PRESETS: [(&str, f32, f32, [f32; 3], f32); 5] = [
     ("Coucher", -60.0, 8.0, [1.0, 0.55, 0.3], 0.85),
     ("Nuit (lune)", 150.0, 35.0, [0.55, 0.65, 1.0], 0.3),
 ];
+
+/// Nom affiché d'un réglage de soleil prédéfini (`SUN_PRESETS`, dont les noms servent aussi de clés).
+pub fn sun_preset_label(name: &str) -> &str {
+    if !crate::i18n::en() {
+        return name;
+    }
+    match name {
+        "Midi" => "Noon",
+        "Matin" => "Morning",
+        "Coucher" => "Sunset",
+        "Nuit (lune)" => "Night (moon)",
+        n => n,
+    }
+}
 
 /// Heure du ciel de la carte qui va avec un réglage de soleil prédéfini (`None` : « Studio »).
 pub fn preset_sky_hour(i: usize) -> Option<f32> {

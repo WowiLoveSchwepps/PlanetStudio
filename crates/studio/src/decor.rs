@@ -37,6 +37,15 @@ pub const ZONES: &[(&str, &str)] = &[
     ("quickload", "quickload"),
 ];
 
+/// Nom affiché d'une carte de `ZONES`.
+pub fn zone_label(label: &'static str) -> &'static str {
+    match label {
+        "Réalité virtuelle (VR)" => tr!(label, "Virtual reality (VR)"),
+        "Tutoriel" => tr!(label, "Tutorial"),
+        l => l,
+    }
+}
+
 fn yes() -> bool {
     true
 }
@@ -190,7 +199,7 @@ pub fn load(
     total: &AtomicUsize,
 ) -> Result<DecorData> {
     let file = format!("{}.zone", settings.zone);
-    let zone = Zone::parse(&game.read(&file)?).with_context(|| format!("lecture de {file}"))?;
+    let zone = Zone::parse(&game.read(&file)?).with_context(|| trf!("lecture de {file}", "reading {file}"))?;
     let mut settings = settings.clone();
     let terrain = if settings.terrain { load_terrain(game, &zone, &settings)? } else { TerrainParts::default() };
     if settings.ground.is_none() {
@@ -592,7 +601,7 @@ fn eco_layers(game: &GameData, ecos: &[&forgelight::zone::Eco]) -> Result<[dds::
         })
         .collect();
     // taille commune : la plus petite
-    let size = loaded.iter().flatten().map(|(c, _)| c.width).min().context("aucune texture de détail")?;
+    let size = loaded.iter().flatten().map(|(c, _)| c.width).min().context(tr!("aucune texture de détail", "no detail texture"))?;
     let mut levels = usize::MAX;
     let mut layers: Vec<[Vec<Vec<u8>>; 2]> = Vec::new();
     for l in loaded {
@@ -1012,7 +1021,7 @@ pub fn parse_arg(s: &str) -> Result<DecorSettings> {
         .iter()
         .map(|z| z.0)
         .find(|z| z.eq_ignore_ascii_case(zone))
-        .with_context(|| format!("carte « {zone} » inconnue"))?;
+        .with_context(|| trf!("carte « {zone} » inconnue", "unknown map “{zone}”"))?;
     Ok(DecorSettings { zone: name.into(), center: [v[0], v[1]], radius: v.get(2).copied().unwrap_or(250.0), ..Default::default() })
 }
 

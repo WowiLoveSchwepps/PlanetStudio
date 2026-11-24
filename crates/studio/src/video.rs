@@ -68,21 +68,23 @@ impl RateMode {
     pub const ALL: [RateMode; 4] = [RateMode::Cbr, RateMode::Vbr1, RateMode::Vbr2, RateMode::Crf];
     pub fn label(self) -> &'static str {
         match self {
-            RateMode::Cbr => "CBR (débit constant)",
-            RateMode::Vbr1 => "VBR, 1 passe",
-            RateMode::Vbr2 => "VBR, 2 passes",
-            RateMode::Crf => "CRF (qualité constante)",
+            RateMode::Cbr => tr!("CBR (débit constant)", "CBR (constant bitrate)"),
+            RateMode::Vbr1 => tr!("VBR, 1 passe", "VBR, 1 pass"),
+            RateMode::Vbr2 => tr!("VBR, 2 passes", "VBR, 2 passes"),
+            RateMode::Crf => tr!("CRF (qualité constante)", "CRF (constant quality)"),
         }
     }
     pub fn hint(self) -> &'static str {
         match self {
-            RateMode::Cbr => "Même débit tout le long : taille prévisible, pour la diffusion en direct ou les vieux lecteurs.",
-            RateMode::Vbr1 => "Plus de débit pour les passages complexes, moins pour les calmes ; un seul encodage.",
-            RateMode::Vbr2 => {
+            RateMode::Cbr => tr!("Même débit tout le long : taille prévisible, pour la diffusion en direct ou les vieux lecteurs.", "Same bitrate throughout: predictable size, for live streaming or old players."),
+            RateMode::Vbr1 => tr!("Plus de débit pour les passages complexes, moins pour les calmes ; un seul encodage.", "More bitrate for complex scenes, less for calm ones; a single encode."),
+            RateMode::Vbr2 => tr!(
                 "Une première passe analyse toute la vidéo, la seconde répartit le débit au mieux : \
-                 meilleure qualité pour une taille donnée, encodage environ deux fois plus long."
-            }
-            RateMode::Crf => "Vise une qualité constante : le débit (et donc la taille) suit la complexité des images.",
+                 meilleure qualité pour une taille donnée, encodage environ deux fois plus long.",
+                "A first pass analyzes the whole video, the second spreads the bitrate as well as possible: \
+                 better quality for a given size, about twice as long to encode."
+            ),
+            RateMode::Crf => tr!("Vise une qualité constante : le débit (et donc la taille) suit la complexité des images.", "Aims for constant quality: the bitrate (and so the size) follows the complexity of the frames."),
         }
     }
     pub fn uses_bitrate(self) -> bool {
@@ -102,9 +104,9 @@ impl Speed {
     pub const ALL: [Speed; 3] = [Speed::Slow, Speed::Medium, Speed::Fast];
     pub fn label(self) -> &'static str {
         match self {
-            Speed::Slow => "Lente (meilleure)",
-            Speed::Medium => "Moyenne",
-            Speed::Fast => "Rapide (brouillon)",
+            Speed::Slow => tr!("Lente (meilleure)", "Slow (best)"),
+            Speed::Medium => tr!("Moyenne", "Medium"),
+            Speed::Fast => tr!("Rapide (brouillon)", "Fast (draft)"),
         }
     }
 }
@@ -157,7 +159,7 @@ impl FrameRate {
             self.num.to_string()
         } else {
             let s = format!("{:.3}", self.fps());
-            s.trim_end_matches('0').trim_end_matches('.').replace('.', ",")
+            s.trim_end_matches('0').trim_end_matches('.').replace('.', tr!(",", "."))
         }
     }
     /// Échelle de temps MP4 et durée d'une image dans cette échelle.
@@ -189,13 +191,13 @@ pub struct VideoParams {
 impl VideoParams {
     pub fn check(&self) -> Result<()> {
         if self.width % 2 != 0 || self.height % 2 != 0 || self.width < 16 || self.height < 16 {
-            bail!("dimensions vidéo invalides : {}×{} (paires et >= 16)", self.width, self.height);
+            bail!("{}", trf!("dimensions vidéo invalides : {}×{} (paires et >= 16)", "invalid video size: {}×{} (must be even and >= 16)", self.width, self.height));
         }
         if !self.codec.fits(self.width, self.height) {
-            bail!("H.264 : 3840×2160 au plus ; choisissez AV1 pour une vidéo plus grande");
+            bail!(tr!("H.264 : 3840×2160 au plus ; choisissez AV1 pour une vidéo plus grande", "H.264: 3840×2160 at most; choose AV1 for a larger video"));
         }
         if self.mode.uses_bitrate() && self.target_bps < 10_000 {
-            bail!("débit cible trop faible");
+            bail!(tr!("débit cible trop faible", "target bitrate too low"));
         }
         Ok(())
     }
@@ -403,7 +405,7 @@ pub fn encode_av1(
         }
     }
     if samples.is_empty() {
-        bail!("aucune image encodée");
+        bail!(tr!("aucune image encodée", "no frame encoded"));
     }
     let av1c = ctx.container_sequence_header();
     let data = if first {
@@ -455,7 +457,7 @@ impl H264 {
         let mut enc: *mut ISVCEncoder = std::ptr::null_mut();
         unsafe {
             if api.WelsCreateSVCEncoder(&mut enc) != 0 || enc.is_null() {
-                bail!("création de l'encodeur H.264");
+                bail!(tr!("création de l'encodeur H.264", "could not create the H.264 encoder"));
             }
         }
         let me = Self { api, enc, info: Box::default(), w: p.width, h: p.height };
@@ -529,7 +531,7 @@ impl H264 {
         unsafe {
             let r = (vt.InitializeExt.context("vtable")?)(enc, &ps);
             if r != 0 {
-                bail!("paramètres H.264 refusés (code {r})");
+                bail!("{}", trf!("paramètres H.264 refusés (code {r})", "H.264 settings rejected (code {r})"));
             }
             let mut quiet: i32 = WELS_LOG_QUIET as i32;
             (vt.SetOption.context("vtable")?)(enc, ENCODER_OPTION_TRACE_LEVEL, (&raw mut quiet).cast());
@@ -546,7 +548,7 @@ impl H264 {
         let mut info = TagBitrateInfo { iLayer: SPATIAL_LAYER_ALL, iBitrate: bps.min(i32::MAX as u32) as i32 };
         let r = unsafe { (vt.SetOption.context("vtable")?)(self.enc, ENCODER_OPTION_BITRATE, (&raw mut info).cast()) };
         if r != 0 {
-            bail!("débit H.264 refusé (code {r})");
+            bail!("{}", trf!("débit H.264 refusé (code {r})", "H.264 bitrate rejected (code {r})"));
         }
         Ok(())
     }
@@ -569,7 +571,7 @@ impl H264 {
         };
         let r = unsafe { (vt.EncodeFrame.context("vtable")?)(self.enc, &pic, &mut *self.info) };
         if r != 0 {
-            bail!("encodage H.264 (code {r})");
+            bail!("{}", trf!("encodage H.264 (code {r})", "H.264 encoding (code {r})"));
         }
         let mut nals = Vec::new();
         if self.info.eFrameType == videoFrameTypeSkip {
@@ -653,13 +655,13 @@ pub fn encode_h264(
             }
         }
         if sample.is_empty() {
-            bail!("image {index} non encodée");
+            bail!("{}", trf!("image {index} non encodée", "frame {index} not encoded"));
         }
         samples.push((sample, key));
         done.fetch_add(1, Ordering::Relaxed);
     }
     if samples.is_empty() {
-        bail!("aucune image encodée");
+        bail!(tr!("aucune image encodée", "no frame encoded"));
     }
     let (sps, pps) = (sps.context("SPS H.264 absent")?, pps.context("PPS H.264 absent")?);
     // AVCDecoderConfigurationRecord
@@ -841,7 +843,7 @@ pub fn write_mp4(path: &Path, w: u32, h: u32, rate: FrameRate, enc: &Encoded) ->
     let mvhd = full_box(b"mvhd", 1, 0, &mvhd_b.0);
     let moov = mp4_box(b"moov", &[mvhd, trak].concat());
 
-    let mut f = std::io::BufWriter::new(std::fs::File::create(path).with_context(|| format!("création de {}", path.display()))?);
+    let mut f = std::io::BufWriter::new(std::fs::File::create(path).with_context(|| trf!("création de {}", "creating {}", path.display()))?);
     f.write_all(&ftyp)?;
     f.write_all(&1u32.to_be_bytes())?;
     f.write_all(b"mdat")?;

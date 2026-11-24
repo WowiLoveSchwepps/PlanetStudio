@@ -35,13 +35,13 @@ impl StudioApp {
         ui.separator();
         ui.label(egui::RichText::new(format!("PlanetStudio {}", update::CURRENT)).weak());
         ui.hyperlink_to(
-            "Logiciel libre, licence GPL-3.0 (sans garantie)",
+            tr!("Logiciel libre, licence GPL-3.0 (sans garantie)", "Free software, GPL-3.0 license (no warranty)"),
             format!("https://github.com/{}/blob/main/LICENSE", update::REPO),
         );
         let source = update::is_source_build();
-        let resp = ui.add_enabled(!source && !self.updater.busy(), egui::Button::new("🔄 Rechercher des mises à jour"));
+        let resp = ui.add_enabled(!source && !self.updater.busy(), egui::Button::new(tr!("🔄 Rechercher des mises à jour", "🔄 Check for updates")));
         let resp = if source {
-            resp.on_disabled_hover_text("Version compilée depuis les sources : mets-la à jour avec git")
+            resp.on_disabled_hover_text(tr!("Version compilée depuis les sources : mets-la à jour avec git", "Built from source: update it with git"))
         } else {
             resp
         };
@@ -51,8 +51,8 @@ impl StudioApp {
             ui.close_menu();
         }
         if ui
-            .checkbox(&mut self.config.update.check_on_start, "Vérifier au démarrage")
-            .on_hover_text("Demande à GitHub s'il existe une version plus récente. Rien ne s'installe sans ton accord.")
+            .checkbox(&mut self.config.update.check_on_start, tr!("Vérifier au démarrage", "Check on startup"))
+            .on_hover_text(tr!("Demande à GitHub s'il existe une version plus récente. Rien ne s'installe sans ton accord.", "Asks GitHub whether a newer version exists. Nothing is installed without your consent."))
             .changed()
         {
             self.config.save();
@@ -80,12 +80,12 @@ impl StudioApp {
                     State::Checking { .. } => {
                         ui.horizontal(|ui| {
                             ui.add(egui::Spinner::new().size(12.0));
-                            ui.label("Recherche de mises à jour…");
+                            ui.label(tr!("Recherche de mises à jour…", "Checking for updates…"));
                         });
                     }
                     State::UpToDate { .. } => {
                         ui.horizontal(|ui| {
-                            ui.label(format!("✔ PlanetStudio {} est à jour.", update::CURRENT));
+                            ui.label(trf!("✔ PlanetStudio {} est à jour.", "✔ PlanetStudio {} is up to date.", update::CURRENT));
                             if ui.button("OK").clicked() {
                                 self.updater.set_idle();
                             }
@@ -94,27 +94,27 @@ impl StudioApp {
                     State::Available(rel) => {
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new(format!("⬆ PlanetStudio {} est disponible", rel.version))
+                                egui::RichText::new(trf!("⬆ PlanetStudio {} est disponible", "⬆ PlanetStudio {} is available", rel.version))
                                     .color(accent)
                                     .strong(),
                             );
-                            ui.label(egui::RichText::new(format!("(tu as la {})", update::CURRENT)).weak());
-                            if ui.button("Mettre à jour").clicked() {
+                            ui.label(egui::RichText::new(trf!("(tu as la {})", "(you have {})", update::CURRENT)).weak());
+                            if ui.button(tr!("Mettre à jour", "Update")).clicked() {
                                 self.updater.install(rel.clone(), ctx);
                             }
-                            if ui.button("Plus tard").on_hover_text("Le bandeau reviendra au prochain démarrage").clicked() {
+                            if ui.button(tr!("Plus tard", "Later")).on_hover_text(tr!("Le bandeau reviendra au prochain démarrage", "The banner will come back on next startup")).clicked() {
                                 self.update_hidden = true;
                             }
-                            if ui.button("Ignorer cette version").clicked() {
+                            if ui.button(tr!("Ignorer cette version", "Skip this version")).clicked() {
                                 self.config.update.skipped = Some(rel.version.clone());
                                 self.config.save();
                             }
-                            if ui.link("Page GitHub").clicked() {
+                            if ui.link(tr!("Page GitHub", "GitHub page")).clicked() {
                                 ctx.open_url(egui::OpenUrl::new_tab(&rel.page));
                             }
                         });
                         if !rel.notes.is_empty() {
-                            egui::CollapsingHeader::new("Notes de version").id_salt("update_notes").show(ui, |ui| {
+                            egui::CollapsingHeader::new(tr!("Notes de version", "Release notes")).id_salt("update_notes").show(ui, |ui| {
                                 egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
                                     ui.label(&rel.notes);
                                 });
@@ -128,16 +128,17 @@ impl StudioApp {
                         ui.horizontal(|ui| {
                             ui.add(egui::Spinner::new().size(12.0));
                             let text = match stage {
-                                0 => format!(
+                                0 => trf!(
                                     "Téléchargement de PlanetStudio {} : {:.1} Mo",
+                                    "Downloading PlanetStudio {}: {:.1} MB",
                                     rel.version,
                                     bytes as f64 / 1_048_576.0
                                 ),
-                                1 => "Vérification du fichier…".to_string(),
-                                _ => "Installation…".to_string(),
+                                1 => tr!("Vérification du fichier…", "Checking the file…").to_string(),
+                                _ => tr!("Installation…", "Installing…").to_string(),
                             };
                             ui.label(text);
-                            if stage == 0 && ui.button("Annuler").clicked() {
+                            if stage == 0 && ui.button(tr!("Annuler", "Cancel")).clicked() {
                                 self.updater.cancel();
                             }
                         });
@@ -146,28 +147,28 @@ impl StudioApp {
                     State::Installed(version) => {
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new(format!("✔ PlanetStudio {version} est installé."))
+                                egui::RichText::new(trf!("✔ PlanetStudio {version} est installé.", "✔ PlanetStudio {version} is installed."))
                                     .color(accent)
                                     .strong(),
                             );
-                            ui.label("Il sera utilisé au prochain démarrage.");
+                            ui.label(tr!("Il sera utilisé au prochain démarrage.", "It will be used on next startup."));
                             if ui
-                                .button("Redémarrer maintenant")
-                                .on_hover_text("Ferme PlanetStudio (le projet est enregistré si l'enregistrement automatique est actif) et le relance")
+                                .button(tr!("Redémarrer maintenant", "Restart now"))
+                                .on_hover_text(tr!("Ferme PlanetStudio (le projet est enregistré si l'enregistrement automatique est actif) et le relance", "Closes PlanetStudio (the project is saved if autosave is on) and starts it again"))
                                 .clicked()
                             {
                                 self.restart_after_exit = true;
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             }
-                            if ui.button("Plus tard").clicked() {
+                            if ui.button(tr!("Plus tard", "Later")).clicked() {
                                 self.updater.set_idle();
                             }
                         });
                     }
                     State::Failed { message, .. } => {
                         ui.horizontal(|ui| {
-                            ui.colored_label(Color32::from_rgb(255, 120, 100), format!("Mise à jour impossible : {message}"));
-                            if ui.button("Fermer").clicked() {
+                            ui.colored_label(Color32::from_rgb(255, 120, 100), trf!("Mise à jour impossible : {message}", "Update failed: {message}"));
+                            if ui.button(tr!("Fermer", "Close")).clicked() {
                                 self.updater.set_idle();
                             }
                         });

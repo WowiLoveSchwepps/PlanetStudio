@@ -40,8 +40,8 @@ impl Decal {
 
     pub fn label(&self) -> String {
         match &self.choice {
-            TextureChoice::None => "Aucune".into(),
-            TextureChoice::Default => "Par défaut de l'armure".into(),
+            TextureChoice::None => tr!("Aucune", "None").into(),
+            TextureChoice::Default => tr!("Par défaut de l'armure", "Armor default").into(),
             TextureChoice::Texture(t) => display_name(t),
         }
     }

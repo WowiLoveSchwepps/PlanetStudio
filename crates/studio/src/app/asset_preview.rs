@@ -103,7 +103,7 @@ impl AssetPreview {
             }
             _ => match self.failed.get(asset) {
                 Some(e) => {
-                    p.text(rect.center(), egui::Align2::CENTER_CENTER, "Aperçu impossible", egui::FontId::proportional(13.0), Color32::LIGHT_RED);
+                    p.text(rect.center(), egui::Align2::CENTER_CENTER, tr!("Aperçu impossible", "Preview unavailable"), egui::FontId::proportional(13.0), Color32::LIGHT_RED);
                     ui.label(RichText::new(e).small().weak());
                 }
                 None => egui::Spinner::new().size(28.0).paint_at(ui, Rect::from_center_size(rect.center(), egui::vec2(28.0, 28.0))),

@@ -3,6 +3,8 @@
 // application à fenêtre : Windows n'ouvre plus de console au lancement (voir attach_parent_console)
 #![windows_subsystem = "windows"]
 
+#[macro_use]
+mod i18n;
 mod anim;
 mod app;
 mod calc;

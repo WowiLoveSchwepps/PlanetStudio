@@ -34,11 +34,11 @@ impl Kind {
 
     pub fn label(self) -> &'static str {
         match self {
-            Kind::Auto => "Auto (selon le continent)",
-            Kind::Aucune => "Aucune",
-            Kind::Feuilles => "🍃 Feuilles qui tombent (Hossin)",
-            Kind::Sable => "🌪 Vent de sable (Indar)",
-            Kind::Neige => "❄ Neige (Esamir)",
+            Kind::Auto => tr!("Auto (selon le continent)", "Auto (from the continent)"),
+            Kind::Aucune => tr!("Aucune", "None"),
+            Kind::Feuilles => tr!("🍃 Feuilles qui tombent (Hossin)", "🍃 Falling leaves (Hossin)"),
+            Kind::Sable => tr!("🌪 Vent de sable (Indar)", "🌪 Sandstorm (Indar)"),
+            Kind::Neige => tr!("❄ Neige (Esamir)", "❄ Snow (Esamir)"),
         }
     }
 

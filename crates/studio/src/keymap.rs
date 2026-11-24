@@ -56,10 +56,10 @@ impl Group {
 
     pub fn title(self) -> &'static str {
         match self {
-            Group::Playback => "▶ Lecture et timeline",
-            Group::Edit => "✏ Édition et fichier",
-            Group::View => "🎬 Vue et gizmo",
-            Group::Fly => "🕹 Déplacement dans la vue",
+            Group::Playback => tr!("▶ Lecture et timeline", "▶ Playback and timeline"),
+            Group::Edit => tr!("✏ Édition et fichier", "✏ Editing and file"),
+            Group::View => tr!("🎬 Vue et gizmo", "🎬 View and gizmo"),
+            Group::Fly => tr!("🕹 Déplacement dans la vue", "🕹 Moving in the viewport"),
         }
     }
 }
@@ -140,34 +140,34 @@ impl Action {
 
     pub fn label(self) -> &'static str {
         match self {
-            Action::PlayPause => "Lecture / pause",
-            Action::PrevFrame => "Image précédente",
-            Action::NextFrame => "Image suivante",
-            Action::SetKey => "Poser une clé",
-            Action::MarkIn => "Marquer l'entrée",
-            Action::MarkOut => "Marquer la sortie",
-            Action::GoToIn => "Atteindre l'entrée",
-            Action::GoToOut => "Atteindre la sortie",
-            Action::ClearInOut => "Effacer l'entrée et la sortie",
-            Action::AddMarker => "Ajouter un marqueur",
-            Action::Undo => "Annuler",
-            Action::Redo => "Rétablir",
-            Action::Save => "Enregistrer le projet",
-            Action::DeleteActor => "Supprimer l'acteur sélectionné",
-            Action::Photo => "Photo (caméra de prise)",
-            Action::GizmoRotate => "Gizmo de rotation",
-            Action::GizmoTranslate => "Gizmo de translation",
-            Action::FrameSelection => "Cadrer la sélection",
-            Action::GridToSelection => "Placer la grille sous le personnage",
-            Action::ToggleCamera => "Caméra de travail / de prise",
-            Action::FlyForward => "Avancer",
-            Action::FlyBack => "Reculer",
-            Action::FlyLeft => "Aller à gauche",
-            Action::FlyRight => "Aller à droite",
-            Action::FlyUp => "Monter",
-            Action::FlyDown => "Descendre",
-            Action::FlyUpRmb => "Monter (clic droit tenu)",
-            Action::FlyDownRmb => "Descendre (clic droit tenu)",
+            Action::PlayPause => tr!("Lecture / pause", "Play / pause"),
+            Action::PrevFrame => tr!("Image précédente", "Previous frame"),
+            Action::NextFrame => tr!("Image suivante", "Next frame"),
+            Action::SetKey => tr!("Poser une clé", "Set a key"),
+            Action::MarkIn => tr!("Marquer l'entrée", "Mark in"),
+            Action::MarkOut => tr!("Marquer la sortie", "Mark out"),
+            Action::GoToIn => tr!("Atteindre l'entrée", "Go to in point"),
+            Action::GoToOut => tr!("Atteindre la sortie", "Go to out point"),
+            Action::ClearInOut => tr!("Effacer l'entrée et la sortie", "Clear in and out points"),
+            Action::AddMarker => tr!("Ajouter un marqueur", "Add a marker"),
+            Action::Undo => tr!("Annuler", "Undo"),
+            Action::Redo => tr!("Rétablir", "Redo"),
+            Action::Save => tr!("Enregistrer le projet", "Save project"),
+            Action::DeleteActor => tr!("Supprimer l'acteur sélectionné", "Delete selected actor"),
+            Action::Photo => tr!("Photo (caméra de prise)", "Photo (shot camera)"),
+            Action::GizmoRotate => tr!("Gizmo de rotation", "Rotation gizmo"),
+            Action::GizmoTranslate => tr!("Gizmo de translation", "Translation gizmo"),
+            Action::FrameSelection => tr!("Cadrer la sélection", "Frame selection"),
+            Action::GridToSelection => tr!("Placer la grille sous le personnage", "Move grid under the character"),
+            Action::ToggleCamera => tr!("Caméra de travail / de prise", "Work / shot camera"),
+            Action::FlyForward => tr!("Avancer", "Forward"),
+            Action::FlyBack => tr!("Reculer", "Back"),
+            Action::FlyLeft => tr!("Aller à gauche", "Left"),
+            Action::FlyRight => tr!("Aller à droite", "Right"),
+            Action::FlyUp => tr!("Monter", "Up"),
+            Action::FlyDown => tr!("Descendre", "Down"),
+            Action::FlyUpRmb => tr!("Monter (clic droit tenu)", "Up (right button held)"),
+            Action::FlyDownRmb => tr!("Descendre (clic droit tenu)", "Down (right button held)"),
         }
     }
 
@@ -309,7 +309,7 @@ impl Binding {
             s += "Ctrl+";
         }
         if self.shift {
-            s += "Maj+";
+            s += tr!("Maj+", "Shift+");
         }
         if self.alt {
             s += "Alt+";
@@ -322,20 +322,20 @@ impl Binding {
 /// l'interface n'a pas les caractères ← →).
 pub fn key_name(key: Key) -> &'static str {
     match key {
-        Key::Space => "Espace",
-        Key::ArrowLeft => "Flèche gauche",
-        Key::ArrowRight => "Flèche droite",
-        Key::ArrowUp => "Flèche haut",
-        Key::ArrowDown => "Flèche bas",
-        Key::Delete => "Suppr",
-        Key::Backspace => "Retour arrière",
-        Key::Enter => "Entrée",
-        Key::Insert => "Inser",
-        Key::Home => "Début",
-        Key::End => "Fin",
-        Key::PageUp => "Pg.Préc",
-        Key::PageDown => "Pg.Suiv",
-        Key::Escape => "Échap",
+        Key::Space => tr!("Espace", "Space"),
+        Key::ArrowLeft => tr!("Flèche gauche", "Left arrow"),
+        Key::ArrowRight => tr!("Flèche droite", "Right arrow"),
+        Key::ArrowUp => tr!("Flèche haut", "Up arrow"),
+        Key::ArrowDown => tr!("Flèche bas", "Down arrow"),
+        Key::Delete => tr!("Suppr", "Del"),
+        Key::Backspace => tr!("Retour arrière", "Backspace"),
+        Key::Enter => tr!("Entrée", "Enter"),
+        Key::Insert => tr!("Inser", "Ins"),
+        Key::Home => tr!("Début", "Home"),
+        Key::End => tr!("Fin", "End"),
+        Key::PageUp => tr!("Pg.Préc", "PgUp"),
+        Key::PageDown => tr!("Pg.Suiv", "PgDn"),
+        Key::Escape => tr!("Échap", "Esc"),
         k => k.name(),
     }
 }
@@ -500,7 +500,7 @@ impl Keymap {
     pub fn label(&self, a: Action) -> String {
         let v: Vec<String> = (0..2).filter_map(|s| self.slot_label(a, s)).collect();
         if v.is_empty() {
-            "aucune touche".into()
+            tr!("aucune touche", "no key").into()
         } else {
             v.join(" / ")
         }

@@ -81,12 +81,12 @@ impl StudioApp {
     /// Ajoute un marqueur sur l'image `f` (rien s'il y en a déjà un) ; renvoie son indice.
     pub(super) fn add_marker(&mut self, f: i32) -> usize {
         if let Some(i) = self.markers.iter().position(|m| m.frame == f) {
-            self.status = format!("Il y a déjà un marqueur à l'image {f}");
+            self.status = trf!("Il y a déjà un marqueur à l'image {f}", "There is already a marker at frame {f}");
             return i;
         }
         self.markers.push(Marker { frame: f, name: String::new() });
         self.markers.sort_by_key(|m| m.frame);
-        self.status = format!("Marqueur ajouté à l'image {f}");
+        self.status = trf!("Marqueur ajouté à l'image {f}", "Marker added at frame {f}");
         self.markers.iter().position(|m| m.frame == f).unwrap_or(0)
     }
 
@@ -137,17 +137,17 @@ impl StudioApp {
         // marqueur sous le clic : nom, atteindre, supprimer
         if let Some(i) = self.tl_menu_marker.filter(|&i| i < self.markers.len()) {
             let f = self.markers[i].frame;
-            ui.label(RichText::new(format!("Marqueur à l'image {f}")).strong());
+            ui.label(RichText::new(trf!("Marqueur à l'image {f}", "Marker at frame {f}")).strong());
             ui.horizontal(|ui| {
-                ui.label("Nom :");
-                ui.add(egui::TextEdit::singleline(&mut self.markers[i].name).desired_width(150.0).hint_text("sans nom"));
+                ui.label(tr!("Nom :", "Name:"));
+                ui.add(egui::TextEdit::singleline(&mut self.markers[i].name).desired_width(150.0).hint_text(tr!("sans nom", "unnamed")));
             });
-            if item(ui, true, "Atteindre ce marqueur", None) {
+            if item(ui, true, tr!("Atteindre ce marqueur", "Go to this marker"), None) {
                 self.playing = false;
                 self.set_frame(f as f32);
                 ui.close_menu();
             }
-            if item(ui, true, "Supprimer ce marqueur", None) {
+            if item(ui, true, tr!("Supprimer ce marqueur", "Delete this marker"), None) {
                 self.markers.remove(i);
                 self.tl_menu_marker = None;
                 ui.close_menu();
@@ -155,17 +155,17 @@ impl StudioApp {
             ui.separator();
         }
 
-        if item(ui, true, "Marquer l'entrée", Some(Action::MarkIn)) {
+        if item(ui, true, tr!("Marquer l'entrée", "Mark in"), Some(Action::MarkIn)) {
             self.mark_in(cur);
             ui.close_menu();
         }
-        if item(ui, true, "Marquer la sortie", Some(Action::MarkOut)) {
+        if item(ui, true, tr!("Marquer la sortie", "Mark out"), Some(Action::MarkOut)) {
             self.mark_out(cur);
             ui.close_menu();
         }
         let clip = self.clip_range();
-        let r = ui.add_enabled(clip.is_some(), egui::Button::new("Marquer le clip")).on_hover_text(
-            "Entrée et sortie autour des clés de la sélection\n(sans sélection : autour des clés de la caméra de prise)",
+        let r = ui.add_enabled(clip.is_some(), egui::Button::new(tr!("Marquer le clip", "Mark the clip"))).on_hover_text(
+            tr!("Entrée et sortie autour des clés de la sélection\n(sans sélection : autour des clés de la caméra de prise)", "In and out around the selection's keys\n(no selection: around the shot camera's keys)"),
         );
         if r.clicked() {
             if let Some((a, b)) = clip {
@@ -175,51 +175,51 @@ impl StudioApp {
         }
         let zoomed = self.tl_view.is_some();
         let r = ui
-            .add_enabled(zoomed, egui::Button::new("Marquer la plage visible"))
-            .on_hover_text("Entrée et sortie aux bords de la timeline zoomée");
+            .add_enabled(zoomed, egui::Button::new(tr!("Marquer la plage visible", "Mark the visible range")))
+            .on_hover_text(tr!("Entrée et sortie aux bords de la timeline zoomée", "In and out at the edges of the zoomed timeline"));
         if r.clicked() {
             let (v0, v1) = self.tl_view_range();
             self.mark_range(v0.round() as i32, v1.round() as i32);
             ui.close_menu();
         }
         ui.separator();
-        if item(ui, marks.is_some(), "Atteindre l'entrée", Some(Action::GoToIn)) {
+        if item(ui, marks.is_some(), tr!("Atteindre l'entrée", "Go to in point"), Some(Action::GoToIn)) {
             self.go_to_in();
             ui.close_menu();
         }
-        if item(ui, marks.is_some(), "Atteindre la sortie", Some(Action::GoToOut)) {
+        if item(ui, marks.is_some(), tr!("Atteindre la sortie", "Go to out point"), Some(Action::GoToOut)) {
             self.go_to_out();
             ui.close_menu();
         }
         ui.separator();
-        if item(ui, marks.is_some_and(|m| m.0 > self.start), "Effacer l'entrée", None) {
+        if item(ui, marks.is_some_and(|m| m.0 > self.start), tr!("Effacer l'entrée", "Clear in point"), None) {
             self.clear_mark_in();
             ui.close_menu();
         }
-        if item(ui, marks.is_some_and(|m| m.1 < self.end), "Effacer la sortie", None) {
+        if item(ui, marks.is_some_and(|m| m.1 < self.end), tr!("Effacer la sortie", "Clear out point"), None) {
             self.clear_mark_out();
             ui.close_menu();
         }
-        if item(ui, marks.is_some(), "Effacer l'entrée et la sortie", Some(Action::ClearInOut)) {
+        if item(ui, marks.is_some(), tr!("Effacer l'entrée et la sortie", "Clear in and out points"), Some(Action::ClearInOut)) {
             self.clear_in_out();
             ui.close_menu();
         }
         ui.separator();
-        if item(ui, true, "Ajouter un marqueur", Some(Action::AddMarker)) {
+        if item(ui, true, tr!("Ajouter un marqueur", "Add a marker"), Some(Action::AddMarker)) {
             let i = self.add_marker(cur);
             // le menu reste ouvert sur le nouveau marqueur pour pouvoir le nommer
             self.tl_menu_marker = Some(i);
         }
         let has = !self.markers.is_empty();
-        if item(ui, self.markers.iter().any(|m| m.frame < cur), "Marqueur précédent", None) {
+        if item(ui, self.markers.iter().any(|m| m.frame < cur), tr!("Marqueur précédent", "Previous marker"), None) {
             self.go_to_marker(-1);
             ui.close_menu();
         }
-        if item(ui, self.markers.iter().any(|m| m.frame > cur), "Marqueur suivant", None) {
+        if item(ui, self.markers.iter().any(|m| m.frame > cur), tr!("Marqueur suivant", "Next marker"), None) {
             self.go_to_marker(1);
             ui.close_menu();
         }
-        if item(ui, has, "Effacer tous les marqueurs", None) {
+        if item(ui, has, tr!("Effacer tous les marqueurs", "Clear all markers"), None) {
             self.markers.clear();
             self.tl_menu_marker = None;
             ui.close_menu();

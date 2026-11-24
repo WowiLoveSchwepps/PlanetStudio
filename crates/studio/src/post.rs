@@ -583,10 +583,10 @@ impl ToneMap {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Clip => "Aucun (écrêtage)",
-            Self::Soft => "Filmique doux (hautes lumières)",
-            Self::Aces => "Filmique ACES (contrasté)",
-            Self::Agx => "Filmique AgX (doux)",
+            Self::Clip => tr!("Aucun (écrêtage)", "None (clipping)"),
+            Self::Soft => tr!("Filmique doux (hautes lumières)", "Soft filmic (highlights)"),
+            Self::Aces => tr!("Filmique ACES (contrasté)", "ACES filmic (contrasty)"),
+            Self::Agx => tr!("Filmique AgX (doux)", "AgX filmic (soft)"),
         }
     }
 

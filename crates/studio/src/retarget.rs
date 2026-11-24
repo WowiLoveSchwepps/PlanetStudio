@@ -189,11 +189,14 @@ pub fn retarget(anim: &FbxAnimation, sk: &Skeleton, name: &str) -> Result<Decode
         .collect();
     let find = |dst_name: &str| pairs.iter().find(|p| sk.bones[p.dst].name.eq_ignore_ascii_case(dst_name));
     let (Some(hips), Some(lhip), Some(rhip), Some(neck)) = (find("COG"), find("L_HIP"), find("R_HIP"), find("NECK")) else {
-        bail!("squelette non reconnu : il faut un squelette Mixamo (Hips, Spine, LeftUpLeg, Neck…) ou Unreal (pelvis, thigh_l, neck_01…) et un soldat");
+        bail!(tr!(
+            "squelette non reconnu : il faut un squelette Mixamo (Hips, Spine, LeftUpLeg, Neck…) ou Unreal (pelvis, thigh_l, neck_01…) et un soldat",
+            "unrecognized skeleton: a Mixamo (Hips, Spine, LeftUpLeg, Neck…) or Unreal (pelvis, thigh_l, neck_01…) skeleton and a soldier are needed"
+        ));
     };
     let animated = pairs.iter().filter(|p| !p.end).count();
     if animated < 10 {
-        bail!("trop peu d'os reconnus ({animated}) : ce FBX n'utilise ni les noms Mixamo ni les noms Unreal");
+        bail!("{}", trf!("trop peu d'os reconnus ({animated}) : ce FBX n'utilise ni les noms Mixamo ni les noms Unreal", "too few recognized bones ({animated}): this FBX uses neither Mixamo nor Unreal names"));
     }
 
     // ---- repères des deux squelettes au repos
@@ -207,7 +210,7 @@ pub fn retarget(anim: &FbxAnimation, sk: &Skeleton, name: &str) -> Result<Decode
         basis(src_pos(lhip.src) - src_pos(rhip.src), src_pos(neck.src) - src_pos(hips.src)),
         basis(dst_pos(lhip.dst) - dst_pos(rhip.dst), dst_pos(neck.dst) - dst_pos(hips.dst)),
     ) else {
-        bail!("orientation du squelette FBX indéterminée");
+        bail!(tr!("orientation du squelette FBX indéterminée", "could not determine the FBX skeleton orientation"));
     };
     // repère FBX → repère du soldat
     let m = Quat::from_mat3(&(bd * bs.transpose())).normalize();

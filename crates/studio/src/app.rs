@@ -66,6 +66,9 @@ struct Config {
     /// mise à jour depuis les GitHub Releases
     #[serde(default)]
     update: update_ui::UpdateSettings,
+    /// langue de l'interface (absente : celle du système)
+    #[serde(default)]
+    lang: Option<crate::i18n::Lang>,
 }
 
 /// Enregistrement automatique : toutes les `minutes` et à la fermeture de l'application.
@@ -107,6 +110,8 @@ fn is_game_dir(p: &std::path::Path) -> bool {
 
 /// Guide d'installation de la version 2019 de PlanetSide 2 (section du README).
 const GAME_GUIDE_URL: &str = "https://github.com/WowiLoveSchwepps/PlanetStudio#installer-planetside-2-version-2019";
+const GAME_GUIDE_URL_EN: &str =
+    "https://github.com/WowiLoveSchwepps/PlanetStudio/blob/main/README.en.md#installing-planetside-2-2019-version";
 
 /// Invitation au serveur Discord (menu Aide). Vide : l'entrée n'est pas affichée.
 const DISCORD_URL: &str = "https://discord.gg/PmNbcgfnD";
@@ -177,12 +182,12 @@ impl Category {
         [Category::Characters, Category::Weapons, Category::Vehicles, Category::Gameplay, Category::Other, Category::All];
     fn label(self) -> &'static str {
         match self {
-            Category::Characters => "Personnages",
-            Category::Weapons => "Armes",
-            Category::Vehicles => "Véhicules",
-            Category::Gameplay => "Objets de base",
-            Category::Other => "Décor / autres",
-            Category::All => "Tout",
+            Category::Characters => tr!("Personnages", "Characters"),
+            Category::Weapons => tr!("Armes", "Weapons"),
+            Category::Vehicles => tr!("Véhicules", "Vehicles"),
+            Category::Gameplay => tr!("Objets de base", "Base objects"),
+            Category::Other => tr!("Décor / autres", "Scenery / other"),
+            Category::All => tr!("Tout", "All"),
         }
     }
     fn matches(self, name: &str) -> bool {
@@ -270,7 +275,7 @@ impl DanceJob {
     fn bake(&self, a: &mut crate::scene::Actor, fps: f32) -> Result<i32, String> {
         match self {
             DanceJob::Horse { start, bpm, secs } => crate::dance::bake_horse_dance(a, *start, fps, *bpm, *secs)
-                .ok_or_else(|| format!("{} : pas de squelette humain complet", a.name)),
+                .ok_or_else(|| trf!("{} : pas de squelette humain complet", "{}: no complete human skeleton", a.name)),
             DanceJob::Fbx { start, name, anim, loops } => {
                 let clip = crate::retarget::retarget(anim, &a.model.skeleton, name).map_err(|e| format!("{} : {e:#}", a.name))?;
                 let mut last = *start;
@@ -292,8 +297,8 @@ impl DanceJob {
 
     fn label(&self) -> String {
         match self {
-            DanceJob::Horse { .. } => "la danse du cheval".into(),
-            DanceJob::Fbx { name, .. } => format!("« {name} »"),
+            DanceJob::Horse { .. } => tr!("la danse du cheval", "the horse dance").into(),
+            DanceJob::Fbx { name, .. } => trf!("« {name} »", "“{name}”"),
         }
     }
 }
@@ -626,6 +631,23 @@ fn search_text(name: &str) -> String {
         l
     }
 }
+/// Nom affiché d'un sexe ou d'une classe de `SEXES` / `CLASSES` (écrits en français).
+fn soldier_word(fr: &'static str) -> &'static str {
+    if !crate::i18n::en() {
+        return fr;
+    }
+    match fr {
+        "Homme" => "Male",
+        "Femme" => "Female",
+        "Assaut lourd" => "Heavy Assault",
+        "Assaut léger" => "Light Assault",
+        "Médecin" => "Combat Medic",
+        "Ingénieur" => "Engineer",
+        "Infiltré" => "Infiltrator",
+        w => w,
+    }
+}
+
 const SEXES: [(&str, &str); 2] = [("Male", "Homme"), ("Female", "Femme")];
 const CLASSES: [(&str, &str); 7] = [
     ("HeavyAssault", "Assaut lourd"),
@@ -674,7 +696,7 @@ fn skin_combo(
             pick_value(ui, choice, SkinChoice::None, n);
         }
         ui.separator();
-        ui.add(egui::TextEdit::singleline(filter).hint_text("Filtrer (ex : auraxium, PS, look010)…"));
+        ui.add(egui::TextEdit::singleline(filter).hint_text(tr!("Filtrer (ex : auraxium, PS, look010)…", "Filter (e.g. auraxium, PS, look010)…")));
         let words: Vec<String> = filter.to_ascii_lowercase().split_whitespace().map(String::from).collect();
         egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
             for n in list {
@@ -719,10 +741,11 @@ impl StudioApp {
         let renderer = Renderer::new(&rs);
         let loader = Loader::new(cc.egui_ctx.clone());
         let config = Config::load();
+        crate::i18n::set(config.lang.unwrap_or_else(crate::i18n::Lang::from_system));
         let game_path = config.game_path.clone().unwrap_or_default().trim().to_string();
         let game_ok = !game_path.is_empty() && is_game_dir(std::path::Path::new(&game_path));
         let game_error = (!game_path.is_empty() && !game_ok).then(|| {
-            format!("Le dossier enregistré ne contient plus les fichiers du jeu :\n{game_path}")
+            trf!("Le dossier enregistré ne contient plus les fichiers du jeu :\n{game_path}", "The saved folder no longer contains the game files:\n{game_path}")
         });
         let restore_project =
             config.last_project.as_deref().map(|p| PathBuf::from(p.trim())).filter(|p| p.is_file());
@@ -880,18 +903,19 @@ impl StudioApp {
     fn open_game(&mut self) {
         let root = PathBuf::from(self.game_path.trim());
         if self.game_path.trim().is_empty() {
-            self.game_error = Some("Choisis d'abord le dossier du jeu.".into());
+            self.game_error = Some(tr!("Choisis d'abord le dossier du jeu.", "Choose the game folder first.").into());
             return;
         }
         if !is_game_dir(&root) {
-            self.game_error = Some(format!(
+            self.game_error = Some(trf!(
                 "Fichiers du jeu introuvables dans ce dossier.\nIl doit contenir Resources\\Assets\\data_x64_0.pack2 :\n{}",
+                "Game files not found in this folder.\nIt must contain Resources\\Assets\\data_x64_0.pack2:\n{}",
                 root.display()
             ));
             return;
         }
         self.game_error = None;
-        self.status = "Ouverture des archives du jeu...".into();
+        self.status = tr!("Ouverture des archives du jeu...", "Opening the game archives...").into();
         self.loader.open_game(PathBuf::from(self.game_path.trim()));
     }
 
@@ -907,7 +931,7 @@ impl StudioApp {
             return;
         }
         let skip: Vec<String> = Vec::new();
-        self.status = format!("Chargement de {asset}...");
+        self.status = trf!("Chargement de {asset}...", "Loading {asset}...");
         self.loader.load_model(game, asset.to_string(), id, skip);
     }
 
@@ -970,8 +994,8 @@ impl StudioApp {
         }
         self.scene.evaluate(self.frame);
         self.status = match dance_err {
-            Some(e) => format!("{asset} ajouté à la scène, sans danse : {e}"),
-            None => format!("{asset} ajouté à la scène"),
+            Some(e) => trf!("{asset} ajouté à la scène, sans danse : {e}", "{asset} added to the scene, without dance: {e}"),
+            None => trf!("{asset} ajouté à la scène", "{asset} added to the scene"),
         };
         for (child, kind) in p.children {
             let attach = match kind {
@@ -1011,17 +1035,17 @@ impl StudioApp {
 
         ui.label(egui::RichText::new("Skins").strong());
         egui::Grid::new(("skins_insp", root)).num_columns(2).show(ui, |ui| {
-            ui.label("Armure");
-            let none = if kind.0 == "NSO" { "Aucune (corps nu)" } else { "Aucune (tenue de base)" };
+            ui.label(tr!("Armure", "Armor"));
+            let none = if kind.0 == "NSO" { tr!("Aucune (corps nu)", "None (bare body)") } else { tr!("Aucune (tenue de base)", "None (base outfit)") };
             let tex = self.renderer.preview_tex;
             skin_combo(ui, ("insp_armure", root), &mut armor, &armors, &mut self.skin_filter, None, Some(none), &mut self.asset_preview, tex);
             ui.end_row();
-            ui.label("Casque");
-            skin_combo(ui, ("insp_casque", root), &mut helmet, &helmets, &mut self.skin_filter, None, Some("Aucun casque"), &mut self.asset_preview, tex);
+            ui.label(tr!("Casque", "Helmet"));
+            skin_combo(ui, ("insp_casque", root), &mut helmet, &helmets, &mut self.skin_filter, None, Some(tr!("Aucun casque", "No helmet")), &mut self.asset_preview, tex);
             ui.end_row();
         });
         ui.horizontal(|ui| {
-            if ui.button("🎲 Au hasard").on_hover_text("Armure et casque tirés au hasard").clicked() {
+            if ui.button(tr!("🎲 Au hasard", "🎲 Random")).on_hover_text(tr!("Armure et casque tirés au hasard", "Random armor and helmet")).clicked() {
                 if !armors.is_empty() {
                     armor = SkinChoice::Named(armors[skins::random_index(armors.len())].clone());
                 }
@@ -1029,7 +1053,7 @@ impl StudioApp {
                     helmet = SkinChoice::Named(helmets[skins::random_index(helmets.len() + 7) % helmets.len()].clone());
                 }
             }
-            ui.label(egui::RichText::new(format!("{} armures, {} casques", armors.len(), helmets.len())).small().weak());
+            ui.label(egui::RichText::new(trf!("{} armures, {} casques", "{} armors, {} helmets", armors.len(), helmets.len())).small().weak());
         });
         self.insp_skin_lists = Some((kind, armors, helmets));
 
@@ -1073,7 +1097,7 @@ impl StudioApp {
             );
         }
         if add.is_empty() {
-            self.status = "Pièce retirée".into();
+            self.status = tr!("Pièce retirée", "Piece removed").into();
         }
     }
 
@@ -1091,18 +1115,18 @@ impl StudioApp {
         let mut apply_all = false;
         ui.label(egui::RichText::new("Camouflage").strong());
         if !accepts {
-            ui.label(egui::RichText::new("Ce modèle n'a pas d'emplacement de camouflage.").small().weak());
+            ui.label(egui::RichText::new(tr!("Ce modèle n'a pas d'emplacement de camouflage.", "This model has no camo slot.")).small().weak());
         }
         ui.horizontal(|ui| {
             egui::ComboBox::from_id_salt(("camo", aid)).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).selected_text(c.label()).width(240.0).show_ui(ui, |ui| {
-                pick_value(ui, &mut c.choice, TextureChoice::None, "Aucun (couleurs d'origine)");
+                pick_value(ui, &mut c.choice, TextureChoice::None, tr!("Aucun (couleurs d'origine)", "None (original colors)"));
                 let def_label = match &default_name {
-                    Some(t) => format!("Par défaut de l'armure ({})", camo::display_name(t)),
-                    None => "Par défaut de l'armure".into(),
+                    Some(t) => trf!("Par défaut de l'armure ({})", "Armor default ({})", camo::display_name(t)),
+                    None => tr!("Par défaut de l'armure", "Armor default").into(),
                 };
                 pick_value(ui, &mut c.choice, TextureChoice::Default, def_label);
                 ui.separator();
-                ui.add(egui::TextEdit::singleline(&mut self.camo_filter).hint_text("Filtrer les camouflages…"));
+                ui.add(egui::TextEdit::singleline(&mut self.camo_filter).hint_text(tr!("Filtrer les camouflages…", "Filter camos…")));
                 let f = self.camo_filter.to_ascii_lowercase();
                 egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                     for t in self.camo_catalog.iter().filter(|t| f.is_empty() || t.to_ascii_lowercase().contains(&f)) {
@@ -1114,13 +1138,13 @@ impl StudioApp {
         });
         ui.add_enabled_ui(c.choice != TextureChoice::None, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Échelle");
+                ui.label(tr!("Échelle", "Scale"));
                 ui.add(crate::calc::drag(&mut c.scale).range(0.5..=32.0).speed(0.05));
-                ui.label("Intensité");
+                ui.label(tr!("Intensité", "Intensity"));
                 ui.add(egui::Slider::new(&mut c.strength, 0.0..=1.0));
             });
         });
-        if ui.button("Appliquer à tous les personnages").clicked() {
+        if ui.button(tr!("Appliquer à tous les personnages", "Apply to all characters")).clicked() {
             apply_all = true;
         }
         if c == a.camo && !apply_all {
@@ -1146,20 +1170,20 @@ impl StudioApp {
             .flat_map(|o| o.model.meshes.iter())
             .find_map(|m| m.decal.clone().filter(|t| !decal::is_blank(t)));
         let mut apply_all = false;
-        ui.label(egui::RichText::new("Décalcomanie").strong());
+        ui.label(egui::RichText::new(tr!("Décalcomanie", "Decal")).strong());
         if !accepts {
-            ui.label(egui::RichText::new("Ce modèle n'a pas d'emplacement de décalcomanie.").small().weak());
+            ui.label(egui::RichText::new(tr!("Ce modèle n'a pas d'emplacement de décalcomanie.", "This model has no decal slot.")).small().weak());
         }
         ui.horizontal(|ui| {
             egui::ComboBox::from_id_salt(("decal", aid)).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).selected_text(d.label()).width(240.0).show_ui(ui, |ui| {
-                pick_value(ui, &mut d.choice, TextureChoice::None, "Aucune");
+                pick_value(ui, &mut d.choice, TextureChoice::None, tr!("Aucune", "None"));
                 let def_label = match &default_name {
-                    Some(t) => format!("Par défaut de l'armure ({})", decal::display_name(t)),
-                    None => "Par défaut de l'armure (aucune)".into(),
+                    Some(t) => trf!("Par défaut de l'armure ({})", "Armor default ({})", decal::display_name(t)),
+                    None => tr!("Par défaut de l'armure (aucune)", "Armor default (none)").into(),
                 };
                 pick_value(ui, &mut d.choice, TextureChoice::Default, def_label);
                 ui.separator();
-                ui.add(egui::TextEdit::singleline(&mut self.decal_filter).hint_text("Filtrer les décalcomanies…"));
+                ui.add(egui::TextEdit::singleline(&mut self.decal_filter).hint_text(tr!("Filtrer les décalcomanies…", "Filter decals…")));
                 let f = self.decal_filter.to_ascii_lowercase();
                 egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                     for t in self.decal_catalog.iter().filter(|t| f.is_empty() || t.to_ascii_lowercase().contains(&f)) {
@@ -1171,11 +1195,11 @@ impl StudioApp {
         });
         ui.add_enabled_ui(d.choice != TextureChoice::None, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Opacité");
+                ui.label(tr!("Opacité", "Opacity"));
                 ui.add(egui::Slider::new(&mut d.opacity, 0.0..=1.0));
             });
         });
-        if ui.button("Appliquer à tous les personnages").clicked() {
+        if ui.button(tr!("Appliquer à tous les personnages", "Apply to all characters")).clicked() {
             apply_all = true;
         }
         if d == a.decal && !apply_all {
@@ -1222,7 +1246,7 @@ impl StudioApp {
             match game.load_texture_gpu(&t) {
                 Ok(img) => self.renderer.upload_texture(&t, &img),
                 Err(e) => {
-                    self.status = format!("Texture {t} illisible : {e:#}");
+                    self.status = trf!("Texture {t} illisible : {e:#}", "Unreadable texture {t}: {e:#}");
                     self.camo_failed.insert(t);
                 }
             }
@@ -1273,7 +1297,7 @@ impl StudioApp {
         let st = self.amb_at(self.frame);
         self.scene.ambiance.set_key(AmbKey::new(frame, st, self.interp));
         self.editing = false;
-        self.status = format!("Clé d'ambiance à l'image {frame}");
+        self.status = trf!("Clé d'ambiance à l'image {frame}", "Ambiance key at frame {frame}");
     }
 
     /// Supprime une clé d'ambiance ; après la dernière, l'ambiance garde ses valeurs.
@@ -1305,7 +1329,7 @@ impl StudioApp {
         let st = self.sun_at(self.frame);
         self.scene.sun.set_key(SunKey::new(frame, st, self.interp));
         self.editing = false;
-        self.status = format!("Clé de soleil à l'image {frame}");
+        self.status = trf!("Clé de soleil à l'image {frame}", "Sun key at frame {frame}");
     }
 
     /// Supprime une clé de soleil ; après la dernière, le soleil reste où elle le mettait.
@@ -1343,16 +1367,16 @@ impl StudioApp {
         let mut q = self.config.quality;
         let mut like_view = self.config.exports_like_view;
         let sample_counts = self.renderer.sample_counts().to_vec();
-        egui::Window::new("Qualité graphique").open(&mut open).resizable(false).show(ctx, |ui| {
+        egui::Window::new(tr!("Qualité graphique", "Graphics quality")).id(egui::Id::new("quality_window")).open(&mut open).resizable(false).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Préréglage");
+                ui.label(tr!("Préréglage", "Preset"));
                 for p in Preset::ALL {
                     if ui.selectable_label(q.matching_preset() == Some(p), p.label()).clicked() {
                         q = q.with_preset(p);
                     }
                 }
                 if q.matching_preset().is_none() {
-                    ui.label(egui::RichText::new("(personnalisé)").weak());
+                    ui.label(egui::RichText::new(tr!("(personnalisé)", "(custom)")).weak());
                 }
             });
             ui.separator();
@@ -1362,24 +1386,24 @@ impl StudioApp {
                 ui.end_row();
             };
             egui::Grid::new("quality").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                section(ui, "Affichage");
-                ui.label("Résolution de la vue");
+                section(ui, tr!("Affichage", "View"));
+                ui.label(tr!("Résolution de la vue", "Viewport resolution"));
                 let mut pct = (q.render_scale * 100.0).round();
                 if ui
                     .add(egui::Slider::new(&mut pct, 50.0..=200.0).suffix(" %"))
-                    .on_hover_text("Au-delà de 100 %, l'image est calculée plus grande puis réduite : contours plus fins, rendu plus lent")
+                    .on_hover_text(tr!("Au-delà de 100 %, l'image est calculée plus grande puis réduite : contours plus fins, rendu plus lent", "Above 100%, the image is rendered larger then scaled down: finer edges, slower rendering"))
                     .changed()
                 {
                     q.render_scale = pct / 100.0;
                 }
                 ui.end_row();
-                ui.label("Luminosité");
+                ui.label(tr!("Luminosité", "Brightness"));
                 ui.add(egui::Slider::new(&mut q.brightness, 0.5..=2.0));
                 ui.end_row();
 
-                section(ui, "Anticrénelage");
+                section(ui, tr!("Anticrénelage", "Anti-aliasing"));
                 ui.label("MSAA");
-                let msaa_label = |n: u32| if n > 1 { format!("{n}× (MSAA)") } else { "Désactivé".to_owned() };
+                let msaa_label = |n: u32| if n > 1 { format!("{n}× (MSAA)") } else { tr!("Désactivé", "Off").to_owned() };
                 // valeur effective : la carte peut refuser 2× ou 8×
                 let effective = sample_counts.iter().copied().filter(|&n| n <= q.msaa.max(1)).max().unwrap_or(1);
                 egui::ComboBox::from_id_salt("msaa").selected_text(msaa_label(effective)).show_ui(ui, |ui| {
@@ -1388,18 +1412,18 @@ impl StudioApp {
                     }
                 })
                 .response
-                .on_hover_text("Lisse les contours des modèles et, avec la flore haute, les bords des feuillages");
+                .on_hover_text(tr!("Lisse les contours des modèles et, avec la flore haute, les bords des feuillages", "Smooths model edges and, with high flora, foliage edges"));
                 ui.end_row();
                 ui.label("");
                 ui.vertical(|ui| {
-                    ui.checkbox(&mut q.fxaa, "FXAA (lissage de l'image finale)")
-                        .on_hover_text("Rattrape les contours que le MSAA ne voit pas ; seul, il remplace un MSAA trop coûteux (image un peu plus douce)");
-                    ui.checkbox(&mut q.specular_aa, "Reflets lissés")
-                        .on_hover_text("Évite le scintillement des reflets du soleil sur le relief fin, les courbures et l'eau au loin");
+                    ui.checkbox(&mut q.fxaa, tr!("FXAA (lissage de l'image finale)", "FXAA (final image smoothing)"))
+                        .on_hover_text(tr!("Rattrape les contours que le MSAA ne voit pas ; seul, il remplace un MSAA trop coûteux (image un peu plus douce)", "Catches the edges MSAA misses; on its own, it replaces a too costly MSAA (slightly softer image)"));
+                    ui.checkbox(&mut q.specular_aa, tr!("Reflets lissés", "Smoothed highlights"))
+                        .on_hover_text(tr!("Évite le scintillement des reflets du soleil sur le relief fin, les courbures et l'eau au loin", "Avoids flickering sun highlights on fine relief, curves and distant water"));
                 });
                 ui.end_row();
 
-                section(ui, "Rendu");
+                section(ui, tr!("Rendu", "Rendering"));
                 ui.label("Textures");
                 egui::ComboBox::from_id_salt("texq").selected_text(q.textures.label()).show_ui(ui, |ui| {
                     for v in TextureQuality::ALL {
@@ -1409,59 +1433,59 @@ impl StudioApp {
                 ui.end_row();
                 ui.label("");
                 ui.vertical(|ui| {
-                    ui.add_enabled(q.textures == TextureQuality::Ultra, egui::Checkbox::new(&mut q.texture_hq, "Filtrage bicubique des gros plans"))
-                        .on_hover_text("Là où un texel couvre plusieurs pixels : plus de losanges ni de marches sur la couleur et le relief (textures « Ultra »)");
+                    ui.add_enabled(q.textures == TextureQuality::Ultra, egui::Checkbox::new(&mut q.texture_hq, tr!("Filtrage bicubique des gros plans", "Bicubic filtering for close-ups")))
+                        .on_hover_text(tr!("Là où un texel couvre plusieurs pixels : plus de losanges ni de marches sur la couleur et le relief (textures « Ultra »)", "Where a texel covers several pixels: no more diamonds or steps on color and relief (“Ultra” textures)"));
                     ui.horizontal(|ui| {
-                        ui.label("Netteté des textures");
+                        ui.label(tr!("Netteté des textures", "Texture sharpness"));
                         ui.add(egui::Slider::new(&mut q.texture_sharpness, 0.0..=1.0))
-                            .on_hover_text("Lit des niveaux de texture plus fins dans les images suréchantillonnées (exports, vue au-delà de 100 %)");
+                            .on_hover_text(tr!("Lit des niveaux de texture plus fins dans les images suréchantillonnées (exports, vue au-delà de 100 %)", "Reads finer texture levels in supersampled images (exports, viewport above 100%)"));
                     });
                 });
                 ui.end_row();
-                ui.label("Ombres");
+                ui.label(tr!("Ombres", "Shadows"));
                 egui::ComboBox::from_id_salt("shadowq").selected_text(q.shadows.label()).show_ui(ui, |ui| {
                     for v in ShadowQuality::ALL {
                         ui.selectable_value(&mut q.shadows, v, v.label());
                     }
                 });
                 ui.end_row();
-                ui.label("Éclairage");
+                ui.label(tr!("Éclairage", "Lighting"));
                 ui.vertical(|ui| {
-                    ui.checkbox(&mut q.normal_maps, "Relief des textures (normal maps)");
+                    ui.checkbox(&mut q.normal_maps, tr!("Relief des textures (normal maps)", "Texture relief (normal maps)"));
                     ui.horizontal(|ui| {
-                        ui.checkbox(&mut q.emissive, "Lumières des textures (émissif)");
+                        ui.checkbox(&mut q.emissive, tr!("Lumières des textures (émissif)", "Texture lights (emissive)"));
                         ui.add_enabled(q.emissive, egui::Slider::new(&mut q.emissive_strength, 0.0..=3.0))
-                            .on_hover_text("Intensité des néons, LED et voyants (1 = défaut). Au-delà, leur halo de bloom s'élargit");
+                            .on_hover_text(tr!("Intensité des néons, LED et voyants (1 = défaut). Au-delà, leur halo de bloom s'élargit", "Intensity of neons, LEDs and indicator lights (1 = default). Above that, their bloom halo widens"));
                     });
                 });
                 ui.end_row();
 
-                section(ui, "Effets");
+                section(ui, tr!("Effets", "Effects"));
                 ui.label("Bloom");
                 ui.add(egui::Slider::new(&mut q.bloom, 0.0..=3.0))
-                    .on_hover_text("Halo autour des zones très lumineuses (LED, emblèmes, reflets vifs). 0 = désactivé");
+                    .on_hover_text(tr!("Halo autour des zones très lumineuses (LED, emblèmes, reflets vifs). 0 = désactivé", "Halo around very bright areas (LEDs, emblems, sharp highlights). 0 = off"));
                 ui.end_row();
-                ui.label("Occlusion ambiante");
+                ui.label(tr!("Occlusion ambiante", "Ambient occlusion"));
                 ui.horizontal(|ui| {
                     ui.add(egui::Slider::new(&mut q.ao, 0.0..=1.0))
-                        .on_hover_text("Assombrit les creux : aisselles, plis, dessous des plaques. 0 = désactivée");
+                        .on_hover_text(tr!("Assombrit les creux : aisselles, plis, dessous des plaques. 0 = désactivée", "Darkens crevices: armpits, folds, under plates. 0 = off"));
                     ui.add_enabled(
                         q.ao > 0.0,
-                        crate::calc::drag(&mut q.ao_radius).range(0.05..=1.0).speed(0.01).prefix("rayon ").suffix(" m"),
+                        crate::calc::drag(&mut q.ao_radius).range(0.05..=1.0).speed(0.01).prefix(tr!("rayon ", "radius ")).suffix(" m"),
                     );
                 });
                 ui.end_row();
-                ui.label("Particules");
+                ui.label(tr!("Particules", "Particles"));
                 egui::ComboBox::from_id_salt("partq").selected_text(q.particles.label()).show_ui(ui, |ui| {
                     for v in ParticleQuality::ALL {
                         ui.selectable_value(&mut q.particles, v, v.label());
                     }
                 })
                 .response
-                .on_hover_text("Nombre de particules d'ambiance (neige, sable, feuilles), en plus de la densité du décor");
+                .on_hover_text(tr!("Nombre de particules d'ambiance (neige, sable, feuilles), en plus de la densité du décor", "Number of ambient particles (snow, sand, leaves), on top of the scenery's density"));
                 ui.end_row();
 
-                section(ui, "Décor");
+                section(ui, tr!("Décor", "Scenery"));
                 ui.label("Terrain");
                 egui::ComboBox::from_id_salt("terrainq").selected_text(q.terrain.label()).show_ui(ui, |ui| {
                     for v in TerrainQuality::ALL {
@@ -1469,44 +1493,45 @@ impl StudioApp {
                     }
                 })
                 .response
-                .on_hover_text("Distance jusqu'où le détail du sol et de la roche est visible");
+                .on_hover_text(tr!("Distance jusqu'où le détail du sol et de la roche est visible", "Distance up to which ground and rock detail is visible"));
                 ui.end_row();
-                ui.label("Flore");
+                ui.label(tr!("Flore", "Flora"));
                 egui::ComboBox::from_id_salt("floraq")
-                    .selected_text(if q.flora_hq { "Haute" } else { "Basse" })
+                    .selected_text(if q.flora_hq { tr!("Haute", "High") } else { tr!("Basse", "Low") })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut q.flora_hq, false, "Basse (découpe nette)");
-                        ui.selectable_value(&mut q.flora_hq, true, "Haute (bords lissés, feuillage garni au loin)");
+                        ui.selectable_value(&mut q.flora_hq, false, tr!("Basse (découpe nette)", "Low (hard cutout)"));
+                        ui.selectable_value(&mut q.flora_hq, true, tr!("Haute (bords lissés, feuillage garni au loin)", "High (smoothed edges, fuller foliage in the distance)"));
                     })
                     .response
-                    .on_hover_text("Les bords lissés demandent le MSAA");
+                    .on_hover_text(tr!("Les bords lissés demandent le MSAA", "Smoothed edges need MSAA"));
                 ui.end_row();
-                ui.label("Eau");
+                ui.label(tr!("Eau", "Water"));
                 egui::ComboBox::from_id_salt("waterq")
-                    .selected_text(if q.water_hq { "Haute" } else { "Basse" })
+                    .selected_text(if q.water_hq { tr!("Haute", "High") } else { tr!("Basse", "Low") })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut q.water_hq, false, "Basse (rides fixes)");
-                        ui.selectable_value(&mut q.water_hq, true, "Haute (houle animée, reflet du ciel)");
+                        ui.selectable_value(&mut q.water_hq, false, tr!("Basse (rides fixes)", "Low (static ripples)"));
+                        ui.selectable_value(&mut q.water_hq, true, tr!("Haute (houle animée, reflet du ciel)", "High (animated swell, sky reflection)"));
                     });
                 ui.end_row();
             });
             ui.separator();
-            ui.label(egui::RichText::new("Photos et vidéos").strong());
+            ui.label(egui::RichText::new(tr!("Photos et vidéos", "Photos and videos")).strong());
             let mut final_exports = !like_view;
-            ui.checkbox(&mut final_exports, "Exporter en « Rendu final » (sinon : qualité de la vue)");
+            ui.checkbox(&mut final_exports, tr!("Exporter en « Rendu final » (sinon : qualité de la vue)", "Export as “Final render” (otherwise: viewport quality)"));
             like_view = !final_exports;
             ui.horizontal(|ui| {
-                ui.label("Suréchantillonnage");
+                ui.label(tr!("Suréchantillonnage", "Supersampling"));
                 for n in 1..=4u32 {
                     ui.selectable_value(&mut q.supersample, n, format!("{n}×"));
                 }
             })
             .response
-            .on_hover_text("Rendu N fois plus grand puis réduit : contours et détails plus fins, export plus lent. Les grandes images sont rendues par tuiles : 4K en 3× ou 4×, 8K et plus sont possibles");
+            .on_hover_text(tr!("Rendu N fois plus grand puis réduit : contours et détails plus fins, export plus lent. Les grandes images sont rendues par tuiles : 4K en 3× ou 4×, 8K et plus sont possibles", "Rendered N times larger then scaled down: finer edges and details, slower export. Large images are rendered in tiles: 4K at 3× or 4×, 8K and more are possible"));
             ui.label(
-                egui::RichText::new(
+                egui::RichText::new(tr!(
                     "Les ombres du soleil se règlent aussi par projet (Affichage > Soleil) ; « Désactivées » ici les coupe partout.",
-                )
+                    "Sun shadows can also be set per project (View > Sun); “Off” here turns them off everywhere."
+                ))
                 .small()
                 .weak(),
             );
@@ -1524,10 +1549,10 @@ impl StudioApp {
         // réglages : voir post_fx_controls
         let mut open = self.post_fx_open;
         let mut fx = self.post_fx;
-        egui::Window::new("Post-traitement").open(&mut open).resizable(false).show(ctx, |ui| {
+        egui::Window::new(tr!("Post-traitement", "Post-processing")).id(egui::Id::new("post_window")).open(&mut open).resizable(false).show(ctx, |ui| {
             post_fx_controls(ui, &mut fx);
             ui.label(
-                egui::RichText::new("Enregistré dans le projet ; la vue, les photos et les vidéos l'utilisent.")
+                egui::RichText::new(tr!("Enregistré dans le projet ; la vue, les photos et les vidéos l'utilisent.", "Saved in the project; the viewport, photos and videos use it."))
                     .small()
                     .weak(),
             );
@@ -1546,7 +1571,7 @@ impl StudioApp {
                 match crate::environment::build(&game, self.lighting.ambiance) {
                     Ok(env) => self.renderer.set_environment(env.as_ref()),
                     Err(e) => {
-                        self.status = format!("Ambiance {} indisponible : {e:#}", self.lighting.ambiance.label());
+                        self.status = trf!("Ambiance {} indisponible : {e:#}", "Ambiance {} unavailable: {e:#}", self.lighting.ambiance.label());
                         self.renderer.set_environment(None);
                         self.lighting.ambiance = Ambiance::Studio;
                     }
@@ -1575,8 +1600,9 @@ impl StudioApp {
                     self.camo_catalog = camo::catalog(&gd);
                     self.decal_catalog = decal::catalog(&gd);
                     self.filter_dirty = true;
-                    self.status = format!(
+                    self.status = trf!(
                         "Jeu chargé : {} fichiers, {} acteurs (.adr), {} modèles (.dme)",
+                        "Game loaded: {} files, {} actors (.adr), {} models (.dme)",
                         gd.index.len(),
                         self.adr_names.len(),
                         self.dme_names.len()
@@ -1595,7 +1621,7 @@ impl StudioApp {
                 }
                 Msg::Game(Err(e)) => {
                     self.game_error = Some(e.clone());
-                    self.status = format!("Erreur : {e}");
+                    self.status = trf!("Erreur : {e}", "Error: {e}");
                 }
                 Msg::Network { name, result } => {
                     self.network_loading = false;
@@ -1603,14 +1629,14 @@ impl StudioApp {
                         Ok(net) => {
                             self.clips = net.main_clips().into_iter().cloned().collect();
                             self.clips.sort_by(|a, b| a.name.cmp(&b.name));
-                            self.status = format!("{name} : {} animations", self.clips.len());
+                            self.status = trf!("{name} : {} animations", "{name}: {} animations", self.clips.len());
                             self.network = Some(net);
                             self.clip_dirty = true;
                             if matches!(self.clip_selected, Some(ClipRef::Game(_))) {
                                 self.clip_selected = None;
                             }
                         }
-                        Err(e) => self.status = format!("Impossible de charger {name} : {e}"),
+                        Err(e) => self.status = trf!("Impossible de charger {name} : {e}", "Could not load {name}: {e}"),
                     }
                 }
                 Msg::Decor { request, result } => self.on_decor_loaded(request, result),
@@ -1629,7 +1655,7 @@ impl StudioApp {
                     }
                     Err(e) => {
                         self.pending.remove(&request);
-                        self.status = format!("Impossible de charger {asset} : {e}");
+                        self.status = trf!("Impossible de charger {asset} : {e}", "Could not load {asset}: {e}");
                     }
                 },
             }
@@ -1681,7 +1707,7 @@ impl StudioApp {
             // casque, et une arme anti-infanterie à chaque bras (pas d'arme pour le Defector NSO)
             let body = skins::max_body(f);
             if self.find_name(std::slice::from_ref(&body)).is_none() {
-                return Err(format!("Corps de MAX introuvable : {body}"));
+                return Err(trf!("Corps de MAX introuvable : {body}", "MAX body not found: {body}"));
             }
             let armor = match armor {
                 SkinChoice::Default if f == "NSO" => self.find_name(&["Armor_Common_Male_Skins_MAX_001.adr".to_string()]),
@@ -1704,7 +1730,7 @@ impl StudioApp {
             // robot NSO : corps + armure de classe + tête-caméra
             let body = "Armor_Common_Male_Skins_Base.adr".to_string();
             if self.find_name(std::slice::from_ref(&body)).is_none() {
-                return Err(format!("Corps NSO introuvable : {body}"));
+                return Err(trf!("Corps NSO introuvable : {body}", "NSO body not found: {body}"));
             }
             let class_armor = match c {
                 "HeavyAssault" => Some("HeavyAssault"),
@@ -1732,7 +1758,7 @@ impl StudioApp {
             "Stealth" => vec![format!("Armor_{f}_{s}_StealthBase.adr"), format!("Armor_{f}_{s}_Infiltrator_Base.adr")],
             _ => vec![format!("Armor_{f}_{s}_{c}_Base.adr")],
         };
-        let armor_main = self.find_name(&armor_c).ok_or_else(|| format!("Armure introuvable : {}", armor_c.join(" / ")))?;
+        let armor_main = self.find_name(&armor_c).ok_or_else(|| trf!("Armure introuvable : {}", "Armor not found: {}", armor_c.join(" / ")))?;
         let mut children = Vec::new();
         if let Some(h) = self.find_name(&[format!("Head_{s}_{}.adr", HEADS[head])]) {
             children.push((h, ChildKind::Merge));
@@ -1839,7 +1865,7 @@ impl StudioApp {
             self.request_model(&main, PendingAdd { select: i == 0, children, place: Some(place), dance: Some(job.clone()), ..Default::default() });
             created += 1;
         }
-        self.status = format!("Troupe de {created} danseurs en cours de chargement ({})...", job.label());
+        self.status = trf!("Troupe de {created} danseurs en cours de chargement ({})...", "Loading a troupe of {created} dancers ({})...", job.label());
     }
 
     /// Danse choisie dans l'onglet Animations, à partir de l'image courante.
@@ -1877,11 +1903,16 @@ impl StudioApp {
         self.scene.evaluate(self.frame);
         self.status = match (n, errors.first()) {
             (0, Some(e)) => e.clone(),
-            (0, None) => "Aucun personnage à faire danser".into(),
-            _ => format!(
+            (0, None) => tr!("Aucun personnage à faire danser", "No character to make dance").into(),
+            _ => trf!(
                 "{n} personnage(s) dansent {}, images {start} à {last}{}",
+                "{n} character(s) dance {}, frames {start} to {last}{}",
                 job.label(),
-                if errors.is_empty() { String::new() } else { format!(" ({} ignoré(s) : {})", errors.len(), errors[0]) }
+                if errors.is_empty() {
+                    String::new()
+                } else {
+                    trf!(" ({} ignoré(s) : {})", " ({} skipped: {})", errors.len(), errors[0])
+                }
             ),
         };
     }
@@ -1991,7 +2022,7 @@ impl StudioApp {
             }
         }
         self.editing = false;
-        self.status = format!("Clé posée à l'image {frame}");
+        self.status = trf!("Clé posée à l'image {frame}", "Key set at frame {frame}");
     }
 
     fn key_all_bones(&mut self) {
@@ -2010,7 +2041,7 @@ impl StudioApp {
             a.key_root(frame, t, interp, true);
         }
         self.editing = false;
-        self.status = format!("Pose complète enregistrée à l'image {frame}");
+        self.status = trf!("Pose complète enregistrée à l'image {frame}", "Full pose saved at frame {frame}");
     }
 
     fn delete_key(&mut self) {
@@ -2057,7 +2088,7 @@ impl StudioApp {
         }
         self.editing = false;
         self.scene.evaluate(self.frame);
-        self.status = format!("{n} clés effacées (Ctrl+Z pour annuler)");
+        self.status = trf!("{n} clés effacées (Ctrl+Z pour annuler)", "{n} keys erased (Ctrl+Z to undo)");
     }
 
     /// Efface toutes les clés de la caméra de prise ; elle reste fixe à sa position actuelle.
@@ -2072,7 +2103,7 @@ impl StudioApp {
         self.scene.camera.keys.clear();
         self.scene.camera.base = crate::anim::CamPose { eye: v.eye.to_array(), target: v.target.to_array(), fov_deg: v.fov_deg };
         self.editing = false;
-        self.status = format!("{n} clés de caméra effacées (Ctrl+Z pour annuler)");
+        self.status = trf!("{n} clés de caméra effacées (Ctrl+Z pour annuler)", "{n} camera keys erased (Ctrl+Z to undo)");
     }
 
     /// Pose une clé sur la caméra de prise (elle devient animée), avec ce qu'on regarde :
@@ -2092,7 +2123,7 @@ impl StudioApp {
             interp: self.interp,
         });
         self.editing = false;
-        let source = if self.shot_view { "caméra de prise" } else { "vue de travail" };
+        let source = if self.shot_view { tr!("caméra de prise", "shot camera") } else { tr!("vue de travail", "work view") };
         // une animation dont toutes les clés sont identiques ne bouge pas : on le signale
         let same = |k: &CamKey| {
             Vec3::from(k.eye).distance(v.eye) < 0.01
@@ -2108,19 +2139,24 @@ impl StudioApp {
             .filter_map(|j| keys.get(j))
             .find(|k| Vec3::from(k.eye).distance(v.eye) < 0.01);
         self.status = if keys.len() > 1 && keys.iter().all(same) {
-            format!(
+            trf!(
                 "Clé de caméra à l'image {frame} (depuis la {source}) — identique aux autres clés : \
-                 la caméra ne bougera pas. Déplacez la vue puis reposez la clé."
+                 la caméra ne bougera pas. Déplacez la vue puis reposez la clé.",
+                "Camera key at frame {frame} (from the {source}) — identical to the other keys: \
+                 the camera will not move. Move the view then set the key again."
             )
         } else if let Some(k) = still {
-            format!(
+            trf!(
                 "Clé de caméra à l'image {frame} (depuis la {source}) — même position que la clé de \
                  l'image {} : seul l'angle changera entre les deux. Pour un travelling, déplacez la \
                  caméra (vol) puis reposez la clé.",
+                "Camera key at frame {frame} (from the {source}) — same position as the key at \
+                 frame {}: only the angle will change between the two. For a dolly move, move the \
+                 camera (fly) then set the key again.",
                 k.frame
             )
         } else {
-            format!("Clé de caméra à l'image {frame} (depuis la {source})")
+            trf!("Clé de caméra à l'image {frame} (depuis la {source})", "Camera key at frame {frame} (from the {source})")
         };
     }
 
@@ -2150,12 +2186,14 @@ impl StudioApp {
             };
             self.shot_key_touch = Some((frame, existed));
             self.status = if existed {
-                format!(
+                trf!(
                     "Clé de caméra de l'image {frame} modifiée — pour une nouvelle clé, changez d'image \
-                     avant de bouger la caméra (Ctrl+Z pour annuler)"
+                     avant de bouger la caméra (Ctrl+Z pour annuler)",
+                    "Camera key at frame {frame} changed — for a new key, change frame \
+                     before moving the camera (Ctrl+Z to undo)"
                 )
             } else {
-                format!("Nouvelle clé de caméra à l'image {frame}")
+                trf!("Nouvelle clé de caméra à l'image {frame}", "New camera key at frame {frame}")
             };
         }
         self.scene.camera.set_pose(frame, eye, target, fov_deg, self.interp);
@@ -2184,7 +2222,7 @@ impl StudioApp {
         }
         if self.cur_frame() >= self.end {
             self.playing = false;
-            self.status = "Enregistrement impossible : la tête de lecture est sur la dernière image.".into();
+            self.status = tr!("Enregistrement impossible : la tête de lecture est sur la dernière image.", "Cannot record: the playhead is on the last frame.").into();
             return;
         }
         let pose = self.real_shot(self.frame);
@@ -2192,7 +2230,7 @@ impl StudioApp {
         self.cam_rec = Some(CamRec::start(&mut self.scene.camera, frame, pose));
         self.playing = true;
         self.last_tick = Instant::now();
-        self.status = format!("⏺ Enregistrement de la caméra depuis l'image {frame}…");
+        self.status = trf!("⏺ Enregistrement de la caméra depuis l'image {frame}…", "⏺ Recording the camera from frame {frame}…");
     }
 
     /// Une image de prise : stabilise, enregistre, et termine la prise quand on lâche les
@@ -2225,9 +2263,9 @@ impl StudioApp {
         self.set_frame(b as f32);
         self.editing = false;
         self.status = if fixed > 0 {
-            format!("Caméra enregistrée de l'image {a} à {b} ({fixed} à-coups adoucis)")
+            trf!("Caméra enregistrée de l'image {a} à {b} ({fixed} à-coups adoucis)", "Camera recorded from frame {a} to {b} ({fixed} jolts smoothed)")
         } else {
-            format!("Caméra enregistrée de l'image {a} à {b}")
+            trf!("Caméra enregistrée de l'image {a} à {b}", "Camera recorded from frame {a} to {b}")
         };
     }
 
@@ -2321,9 +2359,9 @@ impl StudioApp {
         self.set_shot(v.eye, v.target, v.fov_deg);
         self.editing = false;
         self.status = if self.scene.camera.keys.is_empty() {
-            "Caméra de prise placée sur la vue de travail".into()
+            tr!("Caméra de prise placée sur la vue de travail", "Shot camera placed on the work view").into()
         } else {
-            format!("Caméra de prise placée sur la vue de travail (clé à l'image {})", self.cur_frame())
+            trf!("Caméra de prise placée sur la vue de travail (clé à l'image {})", "Shot camera placed on the work view (key at frame {})", self.cur_frame())
         };
     }
 
@@ -2380,7 +2418,7 @@ impl StudioApp {
     /// copié, à l'image courante. Son échelle ne change pas.
     fn paste_position(&mut self) {
         let Some(target) = self.pose_target() else {
-            self.status = "Sélectionnez le personnage à déplacer".into();
+            self.status = tr!("Sélectionnez le personnage à déplacer", "Select the character to move").into();
             return;
         };
         let Some(clip) = self.clipboard_pose.as_ref() else { return };
@@ -2399,7 +2437,7 @@ impl StudioApp {
         }
         self.editing = false;
         self.scene.update_world();
-        self.status = format!("« {name} » placé à la position de « {from} » (image {frame})");
+        self.status = trf!("« {name} » placé à la position de « {from} » (image {frame})", "“{name}” placed at the position of “{from}” (frame {frame})");
     }
 
     fn copy_pose(&mut self, ctx: &egui::Context) {
@@ -2420,8 +2458,9 @@ impl StudioApp {
             })
             .collect();
         let clip = PoseClipboard { from: a.name.clone(), frame: self.cur_frame(), bones, root_world: a.root_world };
-        self.status = format!(
+        self.status = trf!(
             "Pose de « {} » copiée (image {}). Sélectionnez un autre personnage puis Ctrl+V (Ctrl+Maj+V : en miroir).",
+            "Pose of “{}” copied (frame {}). Select another character then Ctrl+V (Ctrl+Shift+V: mirrored).",
             clip.from, clip.frame
         );
         self.clipboard_pose = Some(clip);
@@ -2430,7 +2469,7 @@ impl StudioApp {
 
     fn paste_pose(&mut self, mirror: bool) {
         let Some(target) = self.pose_target() else {
-            self.status = "Sélectionnez le personnage sur lequel coller la pose".into();
+            self.status = tr!("Sélectionnez le personnage sur lequel coller la pose", "Select the character to paste the pose onto").into();
             return;
         };
         let Some(clip) = self.clipboard_pose.take() else { return };
@@ -2467,8 +2506,11 @@ impl StudioApp {
         }
         self.editing = false;
         self.scene.update_world();
-        let how = if mirror { "en miroir " } else { "" };
-        self.status = format!("Pose de « {} » collée {how}sur « {name} » (image {frame})", clip.from);
+        self.status = if mirror {
+            trf!("Pose de « {} » collée en miroir sur « {name} » (image {frame})", "Pose of “{}” pasted mirrored onto “{name}” (frame {frame})", clip.from)
+        } else {
+            trf!("Pose de « {} » collée sur « {name} » (image {frame})", "Pose of “{}” pasted onto “{name}” (frame {frame})", clip.from)
+        };
         self.clipboard_pose = Some(clip);
     }
 
@@ -2476,7 +2518,7 @@ impl StudioApp {
     /// (toutes les clés, pas seulement l'image courante). La position du personnage ne change pas.
     fn paste_anim(&mut self) {
         let Some(target) = self.pose_target() else {
-            self.status = "Sélectionnez le personnage sur lequel coller l'animation".into();
+            self.status = tr!("Sélectionnez le personnage sur lequel coller l'animation", "Select the character to paste the animation onto").into();
             return;
         };
         let Some(clip) = self.clipboard_pose.take() else { return };
@@ -2497,7 +2539,7 @@ impl StudioApp {
         }
         self.editing = false;
         self.scene.evaluate(self.frame);
-        self.status = format!("Animation de « {} » collée sur « {name} » ({} clés)", clip.from, clip.key_count());
+        self.status = trf!("Animation de « {} » collée sur « {name} » ({} clés)", "Animation of “{}” pasted onto “{name}” ({} keys)", clip.from, clip.key_count());
         self.clipboard_pose = Some(clip);
     }
 
@@ -2512,20 +2554,20 @@ impl StudioApp {
     /// Pose la grille aux pieds du personnage sélectionné (sur un toit, un balcon…).
     fn place_grid_at_selection(&mut self) {
         let Some(a) = self.pose_target().and_then(|id| self.scene.actor(id)) else {
-            self.status = "Sélectionnez d'abord un personnage pour y placer la grille".into();
+            self.status = tr!("Sélectionnez d'abord un personnage pour y placer la grille", "First select a character to put the grid under").into();
             return;
         };
         self.grid_origin = a.root_world.w_axis.truncate();
         self.show_grid = true;
         let o = self.grid_origin;
-        self.status = format!("Grille placée sous « {} » ({:.2}, {:.2}, {:.2})", a.name, o.x, o.y, o.z);
+        self.status = trf!("Grille placée sous « {} » ({:.2}, {:.2}, {:.2})", "Grid placed under “{}” ({:.2}, {:.2}, {:.2})", a.name, o.x, o.y, o.z);
     }
 
     /// Pose le personnage sélectionné au centre de la grille : ses pieds (la racine) vont sur
     /// l'origine de la grille, à l'image courante. Son orientation et son échelle ne changent pas.
     fn place_selection_on_grid(&mut self) {
         let Some(target) = self.pose_target() else {
-            self.status = "Sélectionnez d'abord un personnage à poser sur la grille".into();
+            self.status = tr!("Sélectionnez d'abord un personnage à poser sur la grille", "First select a character to put on the grid").into();
             return;
         };
         let world = self.grid_origin;
@@ -2544,8 +2586,9 @@ impl StudioApp {
         }
         self.editing = false;
         self.scene.update_world();
-        self.status = format!(
+        self.status = trf!(
             "« {name} » posé au centre de la grille ({:.2}, {:.2}, {:.2}, image {frame})",
+            "“{name}” put at the center of the grid ({:.2}, {:.2}, {:.2}, frame {frame})",
             world.x, world.y, world.z
         );
     }
@@ -2582,7 +2625,7 @@ impl StudioApp {
             self.sel_bone = None;
         }
         self.scene.evaluate(self.frame);
-        self.status = if redo { "Rétabli" } else { "Annulé" }.into();
+        self.status = if redo { tr!("Rétabli", "Redone") } else { tr!("Annulé", "Undone") }.into();
     }
 
     /// Supprime un acteur et tout ce qui lui est attaché (pièces fusionnées, objets accrochés à un os).
@@ -2665,9 +2708,9 @@ impl StudioApp {
         self.status = match r {
             Ok(json) => {
                 self.mark_saved(path.clone(), json);
-                format!("Projet enregistré : {}", path.display())
+                trf!("Projet enregistré : {}", "Project saved: {}", path.display())
             }
-            Err(e) => format!("Erreur d'enregistrement : {e:#}"),
+            Err(e) => trf!("Erreur d'enregistrement : {e:#}", "Error while saving: {e:#}"),
         };
     }
 
@@ -2695,7 +2738,7 @@ impl StudioApp {
         let json = match self.project_json() {
             Ok(j) => j,
             Err(e) => {
-                self.status = format!("Échec de l'enregistrement automatique : {e:#}");
+                self.status = trf!("Échec de l'enregistrement automatique : {e:#}", "Autosave failed: {e:#}");
                 return;
             }
         };
@@ -2705,10 +2748,10 @@ impl StudioApp {
         let path = self.project_file.clone().unwrap_or_else(untitled_path);
         match write_project(&path, &json) {
             Ok(()) => {
-                self.status = format!("Projet enregistré automatiquement : {}", path.display());
+                self.status = trf!("Projet enregistré automatiquement : {}", "Project autosaved: {}", path.display());
                 self.mark_saved(path, json);
             }
-            Err(e) => self.status = format!("Échec de l'enregistrement automatique : {e:#}"),
+            Err(e) => self.status = trf!("Échec de l'enregistrement automatique : {e:#}", "Autosave failed: {e:#}"),
         }
     }
 
@@ -2772,12 +2815,12 @@ impl StudioApp {
         {
             Ok(p) => p,
             Err(e) => {
-                self.status = format!("Impossible d'ouvrir {} : {e:#}", path.display());
+                self.status = trf!("Impossible d'ouvrir {} : {e:#}", "Could not open {}: {e:#}", path.display());
                 return;
             }
         };
         if self.game.is_none() {
-            self.status = "Ouvrez d'abord le dossier du jeu".into();
+            self.status = tr!("Ouvrez d'abord le dossier du jeu", "Open the game folder first").into();
             return;
         }
         // garde le projet en cours avant de le remplacer (sauf si on rouvre le même fichier :
@@ -2835,7 +2878,7 @@ impl StudioApp {
         self.saved_json = None;
         self.opening = true;
         self.last_autosave = Instant::now();
-        self.status = format!("Projet ouvert : {}", path.display());
+        self.status = trf!("Projet ouvert : {}", "Project opened: {}", path.display());
     }
 
     // -------------------------------------------------------------- vue
@@ -3114,7 +3157,7 @@ impl StudioApp {
         let (o, d) = camera::ray(vp, mouse, size);
         let p = o + d * t;
         if self.sel_actor != Some(id) || self.sel_bone.is_some() {
-            self.status = format!("Déplacement de « {} » (Ctrl : aimanté à la grille)", a.name);
+            self.status = trf!("Déplacement de « {} » (Ctrl : aimanté à la grille)", "Moving “{}” (Ctrl: snap to grid)", a.name);
         }
         self.sel_actor = Some(id);
         self.sel_bone = None;
@@ -3153,7 +3196,7 @@ impl StudioApp {
             self.sel_actor = Some(id);
             self.sel_bone = Some(b);
             if let Some(a) = self.scene.actor(id) {
-                self.status = format!("Os sélectionné : {}", a.model.skeleton.bones[b].name);
+                self.status = trf!("Os sélectionné : {}", "Selected bone: {}", a.model.skeleton.bones[b].name);
             }
             return;
         }
@@ -3438,7 +3481,7 @@ impl StudioApp {
                 p.text(
                     mrect.left_bottom() + EVec2::new(6.0, -4.0),
                     egui::Align2::LEFT_BOTTOM,
-                    if hovered { "🎥 Prise — clic pour y passer (C)" } else { "🎥 Prise" },
+                    if hovered { tr!("🎥 Prise — clic pour y passer (C)", "🎥 Shot — click to switch to it (C)") } else { tr!("🎥 Prise", "🎥 Shot") },
                     egui::FontId::proportional(12.0),
                     Color32::from_rgb(200, 250, 255),
                 );
@@ -3462,12 +3505,12 @@ impl StudioApp {
             }
             painter.rect_stroke(g, 0.0, Stroke::new(1.5_f32, Color32::from_rgb(70, 190, 220)), egui::StrokeKind::Inside);
             let keys = self.scene.camera.keys.len();
-            let anim = if keys == 0 { "fixe".to_string() } else { format!("animée, {keys} clé(s)") };
+            let anim = if keys == 0 { tr!("fixe", "still").to_string() } else { trf!("animée, {keys} clé(s)", "animated, {keys} key(s)") };
             let (fw, fh) = self.shot_format();
             painter.text(
                 Pos2::new(g.max.x - 8.0, g.min.y + 6.0),
                 egui::Align2::RIGHT_TOP,
-                format!("🎥 CAMÉRA DE PRISE  {fw}×{fh}  {:.0}°  ({anim})", self.shot_params(self.frame).fov_deg),
+                trf!("🎥 CAMÉRA DE PRISE  {fw}×{fh}  {:.0}°  ({anim})", "🎥 SHOT CAMERA  {fw}×{fh}  {:.0}°  ({anim})", self.shot_params(self.frame).fov_deg),
                 egui::FontId::proportional(13.0),
                 Color32::from_rgb(160, 240, 255),
             );
@@ -3489,16 +3532,22 @@ impl StudioApp {
         }
         if self.scene.actors.is_empty() {
             let msg = if self.game.is_none() {
-                "Indiquez le dossier de PlanetSide 2 dans le panneau de gauche."
+                tr!("Indiquez le dossier de PlanetSide 2 dans le panneau de gauche.", "Set the PlanetSide 2 folder in the left panel.")
             } else {
-                "Double-cliquez sur un modèle à gauche (ou « Créer le soldat ») pour l'ajouter à la scène."
+                tr!(
+                    "Double-cliquez sur un modèle à gauche (ou « Créer le soldat ») pour l'ajouter à la scène.",
+                    "Double-click a model on the left (or “Create soldier”) to add it to the scene."
+                )
             };
             painter.text(rect.center(), egui::Align2::CENTER_CENTER, msg, egui::FontId::proportional(16.0), Color32::from_gray(170));
         }
+        let hint_en = crate::i18n::en().then(|| self.viewport_hint_en());
         painter.text(
             rect.left_bottom() + EVec2::new(8.0, -6.0),
             egui::Align2::LEFT_BOTTOM,
-            if self.shot_view {
+            if let Some(h) = &hint_en {
+                h.as_str()
+            } else if self.shot_view {
                 "Vous pilotez la caméra de prise : clic droit tenu = regarder   ZQSD = voler (A/E = descendre/monter)   molette = avancer   clic droit + molette = vitesse   Alt+clic = orbite   F = cadrer   K = clé caméra   C = travail   P = photo"
             } else {
                 "Clic droit tenu : regarder + ZQSD voler, A/E descendre/monter, molette = vitesse   Maj : vite   Molette : avancer   Alt+clic : orbite   Clic milieu : glisser   Glisser un personnage : le déplacer (Ctrl : grille)   E/W : gizmo   F : cadrer   Espace : lecture   K : clé   C : prise"
@@ -3529,40 +3578,70 @@ impl StudioApp {
         let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::left_to_right(egui::Align::Center)));
         egui::Frame::NONE.fill(Color32::from_black_alpha(160)).corner_radius(4.0).inner_margin(3.0).show(&mut bar_ui, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.shot_view, false, "🛠 Travail")
-                    .on_hover_text(format!(
+                ui.selectable_value(&mut self.shot_view, false, tr!("🛠 Travail", "🛠 Work"))
+                    .on_hover_text(trf!(
                         "Caméra de travail : libre, pour poser et régler la scène. Jamais rendue. ({})",
+                        "Work camera: free, for posing and setting up the scene. Never rendered. ({})",
                         self.config.keymap.label(Action::ToggleCamera)
                     ));
-                ui.selectable_value(&mut self.shot_view, true, "🎥 Prise")
-                    .on_hover_text(format!(
+                ui.selectable_value(&mut self.shot_view, true, tr!("🎥 Prise", "🎥 Shot"))
+                    .on_hover_text(trf!(
                         "Caméra de prise : celle qui fait la photo et la vidéo. En la regardant, on la pilote. ({})",
+                        "Shot camera: the one that takes the photo and video. While looking through it, you drive it. ({})",
                         self.config.keymap.label(Action::ToggleCamera)
                     ));
                 ui.separator();
                 if !self.shot_view
                     && ui
-                        .button("📷 Placer la prise ici")
-                        .on_hover_text("Met la caméra de prise exactement à la place de la vue de travail")
+                        .button(tr!("📷 Placer la prise ici", "📷 Put the shot here"))
+                        .on_hover_text(tr!("Met la caméra de prise exactement à la place de la vue de travail", "Puts the shot camera exactly where the work view is"))
                         .clicked()
                 {
                     self.shot_from_work();
                 }
                 self.shots_button(ui);
-                if ui.button("📸 Photo").on_hover_text(format!(
+                if ui.button("📸 Photo").on_hover_text(trf!(
                     "Enregistre l'image courante vue par la caméra de prise ({})",
+                    "Saves the current frame as seen by the shot camera ({})",
                     self.config.keymap.label(Action::Photo)
                 )).clicked() {
                     self.take_photo();
                 }
-                if ui.button("🎬 Exporter").on_hover_text("Fenêtre d'export : vidéo H.264 / AV1, GIF animé, images").clicked() {
+                if ui.button(tr!("🎬 Exporter", "🎬 Export")).on_hover_text(tr!("Fenêtre d'export : vidéo H.264 / AV1, GIF animé, images", "Export window: H.264 / AV1 video, animated GIF, images")).clicked() {
                     self.open_export(ExportTab::Video);
                 }
                 ui.separator();
                 self.drone_menu(ui);
-                ui.label(egui::RichText::new(format!("image {}", self.cur_frame())).color(Color32::from_gray(200)));
+                ui.label(egui::RichText::new(trf!("image {}", "frame {}", self.cur_frame())).color(Color32::from_gray(200)));
             });
         });
+    }
+
+    /// Aide en bas de la vue, en anglais : les touches sont celles des raccourcis réglés (WASD sur
+    /// un clavier QWERTY). Le texte français garde les touches AZERTY par défaut.
+    fn viewport_hint_en(&self) -> String {
+        let km = &self.config.keymap;
+        let k = |a: Action| km.slot_label(a, 0).unwrap_or_else(|| "—".into());
+        let wasd = [Action::FlyForward, Action::FlyLeft, Action::FlyBack, Action::FlyRight].map(k).concat();
+        let (down, up) = (k(Action::FlyDownRmb), k(Action::FlyUpRmb));
+        let (frame, key, cam) = (k(Action::FrameSelection), k(Action::SetKey), k(Action::ToggleCamera));
+        if self.shot_view {
+            format!(
+                "You are driving the shot camera: right click held = look   {wasd} = fly ({down}/{up} = down/up)   \
+                 wheel = forward   right click + wheel = speed   Alt+click = orbit   {frame} = frame   {key} = camera key   \
+                 {cam} = work   {} = photo",
+                k(Action::Photo)
+            )
+        } else {
+            format!(
+                "Right click held: look + {wasd} fly, {down}/{up} down/up, wheel = speed   Shift: fast   Wheel: forward   \
+                 Alt+click: orbit   Middle click: pan   Drag a character: move it (Ctrl: grid)   {}/{}: gizmo   \
+                 {frame}: frame   {}: play   {key}: key   {cam}: shot",
+                k(Action::GizmoRotate),
+                k(Action::GizmoTranslate),
+                k(Action::PlayPause)
+            )
+        }
     }
 
     /// Réglages du vol libre : vitesse, sensibilité de la souris, inertie.
@@ -3570,17 +3649,22 @@ impl StudioApp {
         let before = self.config.drone;
         ui.menu_button(format!("🚁 {}", speed_label(before.speed)), |ui| {
             ui.set_min_width(260.0);
-            ui.label(egui::RichText::new("Vol libre (drone)").strong());
+            ui.label(egui::RichText::new(tr!("Vol libre (drone)", "Free flight (drone)")).strong());
             ui.label(
                 egui::RichText::new(
-                    "Clic droit tenu : regarder autour. ZQSD : voler, A/E : descendre/monter, Maj : vite.                      Clic droit + molette : vitesse.",
+                    tr!(
+                        "Clic droit tenu : regarder autour. ZQSD : voler, A/E : descendre/monter, Maj : vite. \
+                         Clic droit + molette : vitesse.",
+                        "Right click held: look around. WASD: fly, Q/E: down/up, Shift: fast. \
+                         Right click + wheel: speed."
+                    ),
                 )
                 .weak(),
             );
             ui.add_space(4.0);
             let d = &mut self.config.drone;
             egui::Grid::new("drone_settings").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                ui.label("Vitesse");
+                ui.label(tr!("Vitesse", "Speed"));
                 ui.add(
                     egui::Slider::new(&mut d.speed, DroneSettings::MIN_SPEED..=DroneSettings::MAX_SPEED)
                         .logarithmic(true)
@@ -3588,30 +3672,34 @@ impl StudioApp {
                         .max_decimals(1),
                 );
                 ui.end_row();
-                ui.label("Sensibilité souris");
+                ui.label(tr!("Sensibilité souris", "Mouse sensitivity"));
                 ui.add(egui::Slider::new(&mut d.sensitivity, 0.1..=4.0).logarithmic(true).max_decimals(2));
                 ui.end_row();
-                ui.label("Inertie");
+                ui.label(tr!("Inertie", "Inertia"));
                 ui.add(egui::Slider::new(&mut d.smoothing, 0.0..=0.6).suffix(" s").max_decimals(2))
-                    .on_hover_text("Temps pour accélérer et freiner. 0 = arrêt net, plus haut = vol plus « drone »");
+                    .on_hover_text(tr!("Temps pour accélérer et freiner. 0 = arrêt net, plus haut = vol plus « drone »", "Time to speed up and brake. 0 = hard stop, higher = more “drone-like” flight"));
                 ui.end_row();
-                ui.label("Souris inversée");
+                ui.label(tr!("Souris inversée", "Inverted mouse"));
                 ui.checkbox(&mut d.invert_y, "vertical");
                 ui.end_row();
-                ui.label("Stabilisation");
+                ui.label(tr!("Stabilisation", "Stabilization"));
                 ui.add(egui::Slider::new(&mut d.stabilize, 0.0..=1.0).max_decimals(2)).on_hover_text(
-                    "Enregistrement en direct (⏺ REC) : adoucit les mouvements brusques de la caméra. \
-                     0 = enregistre tel quel, 1 = très posé",
+                    tr!(
+                        "Enregistrement en direct (⏺ REC) : adoucit les mouvements brusques de la caméra. \
+                         0 = enregistre tel quel, 1 = très posé",
+                        "Live recording (⏺ REC): smooths sudden camera moves. \
+                         0 = records as is, 1 = very steady"
+                    ),
                 );
                 ui.end_row();
             });
             ui.add_space(4.0);
-            if ui.button("Réglages par défaut").clicked() {
+            if ui.button(tr!("Réglages par défaut", "Default settings")).clicked() {
                 *d = DroneSettings::default();
             }
         })
         .response
-        .on_hover_text("Vitesse et réglages du vol libre de la caméra");
+        .on_hover_text(tr!("Vitesse et réglages du vol libre de la caméra", "Speed and settings of the camera's free flight"));
         if self.config.drone != before {
             self.config.save();
         }
@@ -3623,10 +3711,10 @@ impl StudioApp {
         let p = self.loader.progress.load(Ordering::Relaxed);
         ui.horizontal(|ui| {
             ui.add(egui::Spinner::new());
-            ui.label("Ouverture des archives du jeu…");
+            ui.label(tr!("Ouverture des archives du jeu…", "Opening the game archives…"));
         });
         if p > 0 {
-            ui.label("Indexation des noms de fichiers (première fois seulement)...");
+            ui.label(tr!("Indexation des noms de fichiers (première fois seulement)...", "Indexing file names (first time only)..."));
             ui.add(egui::ProgressBar::new(p as f32 / total as f32).show_percentage());
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
@@ -3646,27 +3734,31 @@ impl StudioApp {
         let mut cancel = false;
         let resp = egui::Modal::new(egui::Id::new("game_setup")).show(ctx, |ui| {
             ui.set_width(540.0);
-            ui.heading("Dossier de PlanetSide 2 (version 2019)");
+            ui.heading(tr!("Dossier de PlanetSide 2 (version 2019)", "PlanetSide 2 folder (2019 version)"));
             ui.add_space(6.0);
-            ui.label(
+            ui.label(tr!(
                 "PlanetStudio lit les modèles, textures et animations d'une installation de la \
                  version 2019 de PlanetSide 2. Il ne modifie jamais les fichiers du jeu.",
-            );
+                "PlanetStudio reads the models, textures and animations of an install of the \
+                 2019 version of PlanetSide 2. It never changes the game files."
+            ));
             ui.add_space(4.0);
-            ui.label(
+            ui.label(tr!(
                 "Si tu ne l'as pas encore, suis le guide pour la télécharger depuis ton propre \
                  compte Steam, puis indique son dossier ci-dessous.",
-            );
+                "If you don't have it yet, follow the guide to download it from your own \
+                 Steam account, then set its folder below."
+            ));
             ui.add_space(6.0);
-            if ui.button("📖 Voir le guide d'installation").clicked() {
-                ctx.open_url(egui::OpenUrl::new_tab(GAME_GUIDE_URL));
+            if ui.button(tr!("📖 Voir le guide d'installation", "📖 See the install guide")).clicked() {
+                ctx.open_url(egui::OpenUrl::new_tab(tr!(GAME_GUIDE_URL, GAME_GUIDE_URL_EN)));
             }
             ui.add_space(12.0);
-            ui.label(egui::RichText::new("Dossier du jeu").strong());
+            ui.label(egui::RichText::new(tr!("Dossier du jeu", "Game folder")).strong());
             ui.add_enabled_ui(!busy, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("📁 Parcourir…").clicked() {
-                        let mut dlg = rfd::FileDialog::new().set_title("Dossier de PlanetSide 2 (version 2019)");
+                    if ui.button(tr!("📁 Parcourir…", "📁 Browse…")).clicked() {
+                        let mut dlg = rfd::FileDialog::new().set_title(tr!("Dossier de PlanetSide 2 (version 2019)", "PlanetSide 2 folder (2019 version)"));
                         let cur = PathBuf::from(self.game_path.trim());
                         if cur.is_dir() {
                             dlg = dlg.set_directory(cur);
@@ -3679,7 +3771,7 @@ impl StudioApp {
                     let edit = ui.add(
                         egui::TextEdit::singleline(&mut self.game_path)
                             .desired_width(f32::INFINITY)
-                            .hint_text(r"ex. D:\Jeux\PlanetSide 2 (2019)"),
+                            .hint_text(tr!(r"ex. D:\Jeux\PlanetSide 2 (2019)", r"e.g. D:\Games\PlanetSide 2 (2019)")),
                     );
                     if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         open_now = true;
@@ -3696,10 +3788,10 @@ impl StudioApp {
             }
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if ui.add_enabled(!busy, egui::Button::new("Ouvrir")).clicked() {
+                if ui.add_enabled(!busy, egui::Button::new(tr!("Ouvrir", "Open"))).clicked() {
                     open_now = true;
                 }
-                if can_cancel && ui.button("Annuler").clicked() {
+                if can_cancel && ui.button(tr!("Annuler", "Cancel")).clicked() {
                     cancel = true;
                 }
             });
@@ -3718,19 +3810,19 @@ impl StudioApp {
     // -------------------------------------------------------------- panneaux
 
     fn assets_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Assets du jeu");
+        ui.heading(tr!("Assets du jeu", "Game assets"));
         if self.game.is_none() {
             if self.loader.is_busy() {
                 self.game_loading_ui(ui);
-            } else if ui.button("📁 Choisir le dossier du jeu…").clicked() {
+            } else if ui.button(tr!("📁 Choisir le dossier du jeu…", "📁 Choose the game folder…")).clicked() {
                 self.game_setup = true;
             }
             return;
         }
 
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.left_tab, LeftTab::Models, "🧍 Modèles");
-            ui.selectable_value(&mut self.left_tab, LeftTab::Anims, "🏃 Animations du jeu");
+            ui.selectable_value(&mut self.left_tab, LeftTab::Models, tr!("🧍 Modèles", "🧍 Models"));
+            ui.selectable_value(&mut self.left_tab, LeftTab::Anims, tr!("🏃 Animations du jeu", "🏃 Game animations"));
         });
         ui.separator();
         if self.left_tab == LeftTab::Anims {
@@ -3738,7 +3830,7 @@ impl StudioApp {
             return;
         }
 
-        egui::CollapsingHeader::new("Créer un soldat").default_open(true).show(ui, |ui| {
+        egui::CollapsingHeader::new(tr!("Créer un soldat", "Create a soldier")).default_open(true).show(ui, |ui| {
             egui::Grid::new("soldier").num_columns(2).show(ui, |ui| {
                 ui.label("Faction");
                 egui::ComboBox::from_id_salt("faction").selected_text(FACTIONS[self.soldier_faction]).show_ui(ui, |ui| {
@@ -3747,25 +3839,25 @@ impl StudioApp {
                     }
                 });
                 ui.end_row();
-                ui.label("Sexe");
+                ui.label(tr!("Sexe", "Sex"));
                 let max = is_max(self.soldier_class);
                 ui.add_enabled_ui(!max, |ui| {
-                    let sex = if max { SEXES[0].1 } else { SEXES[self.soldier_sex].1 };
+                    let sex = soldier_word(if max { SEXES[0].1 } else { SEXES[self.soldier_sex].1 });
                     egui::ComboBox::from_id_salt("sexe").selected_text(sex).show_ui(ui, |ui| {
                         for (i, s) in SEXES.iter().enumerate() {
-                            ui.selectable_value(&mut self.soldier_sex, i, s.1);
+                            ui.selectable_value(&mut self.soldier_sex, i, soldier_word(s.1));
                         }
                     });
                 });
                 ui.end_row();
-                ui.label("Classe");
-                egui::ComboBox::from_id_salt("classe").selected_text(CLASSES[self.soldier_class].1).show_ui(ui, |ui| {
+                ui.label(tr!("Classe", "Class"));
+                egui::ComboBox::from_id_salt("classe").selected_text(soldier_word(CLASSES[self.soldier_class].1)).show_ui(ui, |ui| {
                     for (i, c) in CLASSES.iter().enumerate() {
-                        ui.selectable_value(&mut self.soldier_class, i, c.1);
+                        ui.selectable_value(&mut self.soldier_class, i, soldier_word(c.1));
                     }
                 });
                 ui.end_row();
-                ui.label("Visage");
+                ui.label(tr!("Visage", "Face"));
                 let max = is_max(self.soldier_class);
                 let human = FACTIONS[self.soldier_faction] != "NSO";
                 ui.add_enabled_ui(human && !max, |ui| {
@@ -3778,15 +3870,15 @@ impl StudioApp {
                 ui.end_row();
                 if max && !human {
                     ui.label("");
-                    ui.label(egui::RichText::new("MAX NSO : le Defector, sans armes (mains libres)").small().weak());
+                    ui.label(egui::RichText::new(tr!("MAX NSO : le Defector, sans armes (mains libres)", "NSO MAX: the Defector, without weapons (free hands)")).small().weak());
                     ui.end_row();
                 } else if max {
                     ui.label("");
-                    ui.label(egui::RichText::new("MAX : homme seulement, visage caché ; armes anti-infanterie aux bras").small().weak());
+                    ui.label(egui::RichText::new(tr!("MAX : homme seulement, visage caché ; armes anti-infanterie aux bras", "MAX: male only, face hidden; anti-infantry weapons on the arms")).small().weak());
                     ui.end_row();
                 } else if !human {
                     ui.label("");
-                    ui.label(egui::RichText::new("Robot NSO : sexe et visage sans objet").small().weak());
+                    ui.label(egui::RichText::new(tr!("Robot NSO : sexe et visage sans objet", "NSO robot: sex and face do not apply")).small().weak());
                     ui.end_row();
                 }
                 // skins : pièce d'armure posée sur la combinaison, et casque
@@ -3795,13 +3887,13 @@ impl StudioApp {
                     Some((_, a, h)) => (a.clone(), h.clone()),
                     None => (Vec::new(), Vec::new()),
                 };
-                ui.label("Armure");
+                ui.label(tr!("Armure", "Armor"));
                 let (armor_default, armor_none) = if max && human {
-                    ("Aucune (MAX de base)", None)
+                    (tr!("Aucune (MAX de base)", "None (base MAX)"), None)
                 } else if human {
-                    ("Aucune (tenue de base)", None)
+                    (tr!("Aucune (tenue de base)", "None (base outfit)"), None)
                 } else {
-                    ("Par défaut de la classe", Some("Aucune (corps nu)"))
+                    (tr!("Par défaut de la classe", "Class default"), Some(tr!("Aucune (corps nu)", "None (bare body)")))
                 };
                 let tex = self.renderer.preview_tex;
                 skin_combo(
@@ -3816,22 +3908,22 @@ impl StudioApp {
                     tex,
                 );
                 ui.end_row();
-                ui.label("Casque");
+                ui.label(tr!("Casque", "Helmet"));
                 skin_combo(
                     ui,
                     "skin_casque",
                     &mut self.soldier_helmet,
                     &helmets,
                     &mut self.skin_filter,
-                    Some("Par défaut (Look001)"),
-                    Some("Aucun casque"),
+                    Some(tr!("Par défaut (Look001)", "Default (Look001)")),
+                    Some(tr!("Aucun casque", "No helmet")),
                     &mut self.asset_preview,
                     tex,
                 );
                 ui.end_row();
                 ui.label("");
                 ui.horizontal(|ui| {
-                    if ui.button("🎲 Au hasard").on_hover_text("Armure et casque tirés au hasard").clicked() {
+                    if ui.button(tr!("🎲 Au hasard", "🎲 Random")).on_hover_text(tr!("Armure et casque tirés au hasard", "Random armor and helmet")).clicked() {
                         if !armors.is_empty() {
                             self.soldier_armor = SkinChoice::Named(armors[skins::random_index(armors.len())].clone());
                         }
@@ -3839,17 +3931,17 @@ impl StudioApp {
                             self.soldier_helmet = SkinChoice::Named(helmets[skins::random_index(helmets.len() + 7) % helmets.len()].clone());
                         }
                     }
-                    if ui.button("↺").on_hover_text("Revenir à l'armure et au casque par défaut").clicked() {
+                    if ui.button("↺").on_hover_text(tr!("Revenir à l'armure et au casque par défaut", "Back to the default armor and helmet")).clicked() {
                         self.soldier_armor = SkinChoice::Default;
                         self.soldier_helmet = SkinChoice::Default;
                     }
                     ui.label(
-                        egui::RichText::new(format!("{} armures, {} casques", armors.len(), helmets.len())).small().weak(),
+                        egui::RichText::new(trf!("{} armures, {} casques", "{} armors, {} helmets", armors.len(), helmets.len())).small().weak(),
                     );
                 });
                 ui.end_row();
             });
-            if ui.button("➕ Créer le soldat").clicked() {
+            if ui.button(tr!("➕ Créer le soldat", "➕ Create soldier")).clicked() {
                 self.add_soldier();
             }
         });
@@ -3859,7 +3951,7 @@ impl StudioApp {
         ui.horizontal(|ui| {
             ui.label("🔍");
             changed |= ui
-                .add(egui::TextEdit::singleline(&mut self.search).hint_text("rechercher (ex : prowler, TR helmet)"))
+                .add(egui::TextEdit::singleline(&mut self.search).hint_text(tr!("rechercher (ex : prowler, TR helmet)", "search (e.g. prowler, TR helmet)")))
                 .changed();
         });
         ui.horizontal_wrapped(|ui| {
@@ -3869,17 +3961,17 @@ impl StudioApp {
         });
         if self.category == Category::Gameplay {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Faction :");
-                for (f, label) in [(None, "Toutes"), (Some("TR"), "TR"), (Some("NC"), "NC"), (Some("VS"), "VS"), (Some(""), "Neutres")] {
+                ui.label(tr!("Faction :", "Faction:"));
+                for (f, label) in [(None, tr!("Toutes", "All")), (Some("TR"), "TR"), (Some("NC"), "NC"), (Some("VS"), "VS"), (Some(""), tr!("Neutres", "Neutral"))] {
                     changed |= ui.selectable_value(&mut self.faction_filter, f, label).changed();
                 }
             });
         }
-        changed |= ui.checkbox(&mut self.show_dme, "Modèles bruts (.dme) au lieu des acteurs (.adr)").changed();
+        changed |= ui.checkbox(&mut self.show_dme, tr!("Modèles bruts (.dme) au lieu des acteurs (.adr)", "Raw models (.dme) instead of actors (.adr)")).changed();
         if changed || self.filter_dirty {
             self.refilter();
         }
-        ui.label(format!("{} résultats — double-clic pour ajouter, clic droit pour attacher", self.filtered.len()));
+        ui.label(trf!("{} résultats — double-clic pour ajouter, clic droit pour attacher", "{} results — double-click to add, right click to attach", self.filtered.len()));
         ui.separator();
 
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
@@ -3899,17 +3991,17 @@ impl StudioApp {
                     add = Some((name.clone(), None));
                 }
                 r.context_menu(|ui| {
-                    if ui.button("Ajouter à la scène").clicked() {
+                    if ui.button(tr!("Ajouter à la scène", "Add to scene")).clicked() {
                         add = Some((name.clone(), None));
                         ui.close_menu();
                     }
                     if let Some(p) = sel_actor {
-                        if ui.button("Fusionner sur l'acteur sélectionné (tête, casque, armure)").clicked() {
+                        if ui.button(tr!("Fusionner sur l'acteur sélectionné (tête, casque, armure)", "Merge onto the selected actor (head, helmet, armor)")).clicked() {
                             add = Some((name.clone(), Some(PendingAttach::Merge(p))));
                             ui.close_menu();
                         }
                         let bone = sel_bone_name.clone().unwrap_or_else(|| "R_WEAPON".into());
-                        if ui.button(format!("Attacher à l'os {bone} de l'acteur sélectionné")).clicked() {
+                        if ui.button(trf!("Attacher à l'os {bone} de l'acteur sélectionné", "Attach to bone {bone} of the selected actor")).clicked() {
                             add = Some((name.clone(), Some(PendingAttach::Bone(p, bone))));
                             ui.close_menu();
                         }
@@ -3966,7 +4058,7 @@ impl StudioApp {
         match DecodedClip::decode(&net, &info) {
             Ok(c) => Some(Arc::new(c)),
             Err(e) => {
-                self.status = format!("Décodage impossible : {e:#}");
+                self.status = trf!("Décodage impossible : {e:#}", "Could not decode: {e:#}");
                 None
             }
         }
@@ -3976,7 +4068,7 @@ impl StudioApp {
     fn retargeted_fbx(&mut self, i: usize) -> Option<Arc<DecodedClip>> {
         let clip = self.fbx_clips.get(i)?;
         let Some(a) = self.anim_target().and_then(|id| self.scene.actor(id)) else {
-            self.status = "Sélectionnez d'abord un personnage dans la scène".into();
+            self.status = tr!("Sélectionnez d'abord un personnage dans la scène", "First select a character in the scene").into();
             return None;
         };
         match crate::retarget::retarget(&clip.anim, &a.model.skeleton, &clip.name) {
@@ -3993,7 +4085,7 @@ impl StudioApp {
         match r {
             ClipRef::Game(i) => self.clips.get(i).map(|c| (c.name.clone(), c.category.clone(), c.duration)),
             ClipRef::Fbx(i) => self.fbx_clips.get(i).map(|c| {
-                let desc = format!("FBX, {} images à {} i/s", c.anim.frames.len(), c.anim.fps);
+                let desc = trf!("FBX, {} images à {} i/s", "FBX, {} frames at {} fps", c.anim.frames.len(), c.anim.fps);
                 (c.name.clone(), desc, c.anim.duration())
             }),
         }
@@ -4007,7 +4099,7 @@ impl StudioApp {
         let anim = match parsed {
             Ok(a) => Arc::new(a),
             Err(e) => {
-                self.status = format!("Import de {} impossible : {e:#}", path.display());
+                self.status = trf!("Import de {} impossible : {e:#}", "Could not import {}: {e:#}", path.display());
                 return;
             }
         };
@@ -4024,7 +4116,7 @@ impl StudioApp {
             }
         };
         let a = &self.fbx_clips[i].anim;
-        self.status = format!("{name} importé : {:.2} s, {} os", a.duration(), a.names.len());
+        self.status = trf!("{name} importé : {:.2} s, {} os", "{name} imported: {:.2} s, {} bones", a.duration(), a.names.len());
         self.left_tab = LeftTab::Anims;
         self.clip_part = BodyPart::All;
         self.select_clip(ClipRef::Fbx(i));
@@ -4052,11 +4144,11 @@ impl StudioApp {
 
     /// Section d'import des animations FBX (Mixamo).
     fn fbx_ui(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new("🎞 Animations FBX (Mixamo)").default_open(false).show(ui, |ui| {
+        egui::CollapsingHeader::new(tr!("🎞 Animations FBX (Mixamo)", "🎞 FBX animations (Mixamo)")).default_open(false).show(ui, |ui| {
             ui.label(
                 egui::RichText::new(
-                    "Export Mixamo : format FBX Binary, « Without Skin ». Glissez le fichier sur la fenêtre, \
-                     ou choisissez-le ci-dessous. Le mouvement est transféré sur le squelette du personnage.",
+                    tr!("Export Mixamo : format FBX Binary, « Without Skin ». Glissez le fichier sur la fenêtre, \
+                     ou choisissez-le ci-dessous. Le mouvement est transféré sur le squelette du personnage.", "Mixamo export: FBX Binary format, “Without Skin”. Drop the file on the window, or pick it below. The motion is transferred onto the character's skeleton."),
                 )
                 .small()
                 .weak(),
@@ -4065,7 +4157,7 @@ impl StudioApp {
             ui.horizontal(|ui| {
                 // largeur fixe : une largeur tirée de la place disponible fait grandir le panneau à chaque image
                 ui.add(egui::TextEdit::singleline(&mut self.fbx_path).hint_text("C:\\…\\Dancing.fbx").desired_width(200.0));
-                if ui.add_enabled(!self.fbx_path.trim().is_empty(), egui::Button::new("Importer")).clicked() {
+                if ui.add_enabled(!self.fbx_path.trim().is_empty(), egui::Button::new(tr!("Importer", "Import"))).clicked() {
                     import = Some(PathBuf::from(self.fbx_path.trim().trim_matches('"')));
                 }
             });
@@ -4086,7 +4178,7 @@ impl StudioApp {
             let fresh: Vec<PathBuf> =
                 self.fbx_found.0.iter().filter(|p| !self.fbx_clips.iter().any(|c| &c.path == *p)).cloned().collect();
             if !fresh.is_empty() {
-                ui.label(egui::RichText::new("Fichiers trouvés (Téléchargements, Documents/PlanetStudio) :").small());
+                ui.label(egui::RichText::new(tr!("Fichiers trouvés (Téléchargements, Documents/PlanetStudio) :", "Files found (Downloads, Documents/PlanetStudio):")).small());
                 ui.horizontal_wrapped(|ui| {
                     for p in fresh {
                         let name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
@@ -4101,7 +4193,7 @@ impl StudioApp {
             let mut remove = None;
             for (i, c) in self.fbx_clips.iter().enumerate() {
                 ui.horizontal(|ui| {
-                    if ui.small_button("✖").on_hover_text("Retirer de la liste").clicked() {
+                    if ui.small_button("✖").on_hover_text(tr!("Retirer de la liste", "Remove from the list")).clicked() {
                         remove = Some(i);
                     }
                     let r = ui
@@ -4142,7 +4234,7 @@ impl StudioApp {
 
     fn apply_clip(&mut self, idx: ClipRef, pose_only: bool) {
         let Some(target) = self.anim_target() else {
-            self.status = "Sélectionnez d'abord un personnage dans la scène".into();
+            self.status = tr!("Sélectionnez d'abord un personnage dans la scène", "First select a character in the scene").into();
             return;
         };
         let Some(clip) = self.decoded_clip(idx) else { return };
@@ -4198,12 +4290,13 @@ impl StudioApp {
         }
         self.scene.evaluate(self.frame);
         self.status = if pose_only {
-            format!("Pose de {} appliquée à l'image {start}", clip.name)
+            trf!("Pose de {} appliquée à l'image {start}", "Pose of {} applied at frame {start}", clip.name)
         } else {
-            format!(
+            trf!(
                 "{} écrit dans la timeline, images {start} à {last}{}",
+                "{} written to the timeline, frames {start} to {last}{}",
                 clip.name,
-                if root_motion { " (avec déplacement)" } else { "" }
+                if root_motion { tr!(" (avec déplacement)", " (with root motion)") } else { "" }
             )
         };
     }
@@ -4242,11 +4335,11 @@ impl StudioApp {
         if self.dance_fbx.as_ref().is_some_and(|p| !self.fbx_clips.iter().any(|c| &c.path == p)) {
             self.dance_fbx = None;
         }
-        egui::CollapsingHeader::new("💃 Danses de groupe").default_open(false).show(ui, |ui| {
+        egui::CollapsingHeader::new(tr!("💃 Danses de groupe", "💃 Group dances")).default_open(false).show(ui, |ui| {
             ui.label(
                 egui::RichText::new(
-                    "La danse du cheval (générée) ou une animation FBX importée plus bas, \
-                     sur un personnage, sur toute la scène ou sur une troupe.",
+                    tr!("La danse du cheval (générée) ou une animation FBX importée plus bas, \
+                     sur un personnage, sur toute la scène ou sur une troupe.", "The horse dance (generated) or an FBX animation imported below, on one character, on the whole scene or on a troupe."),
                 )
                 .small()
                 .weak(),
@@ -4256,11 +4349,11 @@ impl StudioApp {
                 .as_ref()
                 .and_then(|p| self.fbx_clips.iter().find(|c| &c.path == p))
                 .map(|c| format!("🎞 {}", c.name))
-                .unwrap_or_else(|| "🐎 Danse du cheval".into());
+                .unwrap_or_else(|| tr!("🐎 Danse du cheval", "🐎 Horse dance").into());
             ui.horizontal(|ui| {
-                ui.label("Danse");
+                ui.label(tr!("Danse", "Dance"));
                 egui::ComboBox::from_id_salt("dance_choice").selected_text(chosen_name).width(180.0).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.dance_fbx, None, "🐎 Danse du cheval");
+                    ui.selectable_value(&mut self.dance_fbx, None, tr!("🐎 Danse du cheval", "🐎 Horse dance"));
                     for c in &self.fbx_clips {
                         ui.selectable_value(&mut self.dance_fbx, Some(c.path.clone()), format!("🎞 {}  ({:.1}s)", c.name, c.anim.duration()));
                     }
@@ -4271,15 +4364,15 @@ impl StudioApp {
                     ui.add(crate::calc::drag(&mut self.dance_bpm).range(60.0..=200.0).suffix(" BPM"));
                     ui.add(crate::calc::drag(&mut self.dance_secs).range(1.0..=120.0).suffix(" s"));
                 } else {
-                    ui.add(crate::calc::drag(&mut self.dance_loops).range(1..=50).prefix("× ").suffix(" répétitions"));
+                    ui.add(crate::calc::drag(&mut self.dance_loops).range(1..=50).prefix("× ").suffix(tr!(" répétitions", " loops")));
                 }
             });
             if self.fbx_clips.is_empty() {
-                ui.label(egui::RichText::new("Importez un FBX Mixamo (section ci-dessous) pour le proposer ici.").small().weak());
+                ui.label(egui::RichText::new(tr!("Importez un FBX Mixamo (section ci-dessous) pour le proposer ici.", "Import a Mixamo FBX (section below) to offer it here.")).small().weak());
             }
             let label = match self.anim_target().and_then(|id| self.scene.actor(id)) {
-                Some(a) => format!("💃 Faire danser {} (dès l'image {})", a.name, self.cur_frame()),
-                None => "💃 Faire danser (sélectionnez un personnage)".into(),
+                Some(a) => trf!("💃 Faire danser {} (dès l'image {})", "💃 Make {} dance (from frame {})", a.name, self.cur_frame()),
+                None => tr!("💃 Faire danser (sélectionnez un personnage)", "💃 Make dance (select a character)").into(),
             };
             if ui.add_enabled(self.anim_target().is_some(), egui::Button::new(label).wrap()).clicked() {
                 if let Some(t) = self.anim_target() {
@@ -4288,16 +4381,16 @@ impl StudioApp {
             }
             let roots: Vec<u64> = self.scene.actors.iter().filter(|a| a.attachment.is_none()).map(|a| a.id).collect();
             if ui
-                .add_enabled(!roots.is_empty(), egui::Button::new(format!("🕺 Faire danser tous les personnages ({})", roots.len())))
+                .add_enabled(!roots.is_empty(), egui::Button::new(trf!("🕺 Faire danser tous les personnages ({})", "🕺 Make all characters dance ({})", roots.len())))
                 .clicked()
             {
                 self.dance_actors(roots);
             }
             ui.horizontal(|ui| {
-                ui.add(crate::calc::drag(&mut self.troupe_size).range(2..=24).suffix(" danseurs"));
+                ui.add(crate::calc::drag(&mut self.troupe_size).range(2..=24).suffix(tr!(" danseurs", " dancers")));
                 if ui
-                    .add_enabled(self.game.is_some(), egui::Button::new("👯 Créer une troupe"))
-                    .on_hover_text("TR, NC, VS et NSO mélangés, en formation en V, qui dansent tous ensemble")
+                    .add_enabled(self.game.is_some(), egui::Button::new(tr!("👯 Créer une troupe", "👯 Create a troupe")))
+                    .on_hover_text(tr!("TR, NC, VS et NSO mélangés, en formation en V, qui dansent tous ensemble", "TR, NC, VS and NSO mixed, in a V formation, all dancing together"))
                     .clicked()
                 {
                     let job = self.dance_job();
@@ -4308,7 +4401,7 @@ impl StudioApp {
         self.fbx_ui(ui);
         ui.separator();
         ui.horizontal(|ui| {
-            ui.label("Réseau");
+            ui.label(tr!("Réseau", "Network"));
             let mut name = self.network_name.clone();
             egui::ComboBox::from_id_salt("mrn").selected_text(&name).width(180.0).show_ui(ui, |ui| {
                 for n in &self.mrn_names {
@@ -4317,13 +4410,13 @@ impl StudioApp {
             });
             let changed = name != self.network_name;
             self.network_name = name;
-            let label = if self.network.is_some() && !changed { "Recharger" } else { "Charger" };
+            let label = if self.network.is_some() && !changed { tr!("Recharger", "Reload") } else { tr!("Charger", "Load") };
             let clicked = ui.add_enabled(!self.network_loading, egui::Button::new(label)).clicked();
             if (changed || clicked) && !self.network_loading {
                 if let Some(g) = self.game.clone() {
                     self.network_loading = true;
                     self.preview = None;
-                    self.status = format!("Chargement de {}...", self.network_name);
+                    self.status = trf!("Chargement de {}...", "Loading {}...", self.network_name);
                     self.loader.load_network(g, self.network_name.clone());
                 }
             }
@@ -4332,7 +4425,7 @@ impl StudioApp {
             ui.add(egui::Spinner::new());
         }
         if self.network.is_none() {
-            ui.label("ThirdPerson.mrn contient les animations des soldats (course, tir, emotes, morts...).");
+            ui.label(tr!("ThirdPerson.mrn contient les animations des soldats (course, tir, emotes, morts...).", "ThirdPerson.mrn holds the soldiers' animations (running, shooting, emotes, deaths...)."));
             if !self.network_loading {
                 if let Some(g) = self.game.clone() {
                     self.network_loading = true;
@@ -4346,23 +4439,23 @@ impl StudioApp {
         ui.horizontal(|ui| {
             ui.label("🔍");
             changed |= ui
-                .add(egui::TextEdit::singleline(&mut self.clip_search).hint_text("ex : rifle sprint, emote, death"))
+                .add(egui::TextEdit::singleline(&mut self.clip_search).hint_text(tr!("ex : rifle sprint, emote, death", "e.g. rifle sprint, emote, death")))
                 .changed();
         });
         ui.horizontal(|ui| {
             let mut cats: Vec<String> = self.clips.iter().map(|c| c.category.clone()).collect();
             cats.sort();
             cats.dedup();
-            let cur = if self.clip_category.is_empty() { "Toutes catégories".to_string() } else { self.clip_category.clone() };
+            let cur = if self.clip_category.is_empty() { tr!("Toutes catégories", "All categories").to_string() } else { self.clip_category.clone() };
             egui::ComboBox::from_id_salt("clipcat").selected_text(cur).width(160.0).show_ui(ui, |ui| {
-                changed |= ui.selectable_value(&mut self.clip_category, String::new(), "Toutes catégories").changed();
+                changed |= ui.selectable_value(&mut self.clip_category, String::new(), tr!("Toutes catégories", "All categories")).changed();
                 for c in cats {
                     changed |= ui.selectable_value(&mut self.clip_category, c.clone(), c).changed();
                 }
             });
             changed |= ui
-                .checkbox(&mut self.clip_additive, "additifs")
-                .on_hover_text("Clips de superposition (recul, visée) : à appliquer par-dessus une autre animation")
+                .checkbox(&mut self.clip_additive, tr!("additifs", "additive"))
+                .on_hover_text(tr!("Clips de superposition (recul, visée) : à appliquer par-dessus une autre animation", "Overlay clips (recoil, aim): to apply on top of another animation"))
                 .changed();
         });
         if changed || self.clip_dirty {
@@ -4406,29 +4499,29 @@ impl StudioApp {
         let meta = self.clip_selected.and_then(|r| self.clip_meta(r).map(|m| (r, m)));
         egui::Frame::group(ui.style()).show(ui, |ui| match meta {
             None => {
-                ui.label("Cliquez sur un clip pour le prévisualiser, double-cliquez pour l'écrire dans la timeline.");
+                ui.label(tr!("Cliquez sur un clip pour le prévisualiser, double-cliquez pour l'écrire dans la timeline.", "Click a clip to preview it, double-click to write it to the timeline."));
             }
             Some((sel, (name, category, duration))) => {
                 ui.label(egui::RichText::new(&name).strong());
                 ui.label(format!("{category}  —  {duration:.2} s"));
                 ui.horizontal(|ui| {
-                    ui.add(crate::calc::drag(&mut self.clip_speed).speed(0.01).range(0.05..=5.0).prefix("vitesse ×"));
-                    ui.add(crate::calc::drag(&mut self.clip_loops).range(1..=50).prefix("répétitions "));
+                    ui.add(crate::calc::drag(&mut self.clip_speed).speed(0.01).range(0.05..=5.0).prefix(tr!("vitesse ×", "speed ×")));
+                    ui.add(crate::calc::drag(&mut self.clip_loops).range(1..=50).prefix(tr!("répétitions ", "loops ")));
                 });
-                egui::CollapsingHeader::new("Mélange").default_open(true).show(ui, |ui| {
+                egui::CollapsingHeader::new(tr!("Mélange", "Blending")).default_open(true).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.selectable_value(&mut self.clip_mode, BlendMode::Replace, "Remplacer")
-                            .on_hover_text("Le clip remplace l'animation existante (selon le poids et les fondus)");
-                        ui.selectable_value(&mut self.clip_mode, BlendMode::Additive, "Superposer")
-                            .on_hover_text("Le clip s'ajoute par-dessus l'animation existante (clips « Additive » : recul, visée...)");
+                        ui.selectable_value(&mut self.clip_mode, BlendMode::Replace, tr!("Remplacer", "Replace"))
+                            .on_hover_text(tr!("Le clip remplace l'animation existante (selon le poids et les fondus)", "The clip replaces the existing animation (based on weight and fades)"));
+                        ui.selectable_value(&mut self.clip_mode, BlendMode::Additive, tr!("Superposer", "Add on top"))
+                            .on_hover_text(tr!("Le clip s'ajoute par-dessus l'animation existante (clips « Additive » : recul, visée...)", "The clip is added on top of the existing animation (“Additive” clips: recoil, aim...)"));
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Poids");
+                        ui.label(tr!("Poids", "Weight"));
                         ui.add(egui::Slider::new(&mut self.clip_weight, 0.0..=1.0).fixed_decimals(2));
                     });
                     ui.horizontal(|ui| {
-                        ui.add(crate::calc::drag(&mut self.clip_fade_in).range(0..=600).prefix("fondu entrée ").suffix(" im."));
-                        ui.add(crate::calc::drag(&mut self.clip_fade_out).range(0..=600).prefix("sortie ").suffix(" im."));
+                        ui.add(crate::calc::drag(&mut self.clip_fade_in).range(0..=600).prefix(tr!("fondu entrée ", "fade in ")).suffix(tr!(" im.", " fr.")));
+                        ui.add(crate::calc::drag(&mut self.clip_fade_out).range(0..=600).prefix(tr!("sortie ", "out ")).suffix(tr!(" im.", " fr.")));
                     });
                     egui::ComboBox::from_id_salt("bodypart").selected_text(self.clip_part.label()).show_ui(ui, |ui| {
                         for bp in BodyPart::ALL {
@@ -4436,31 +4529,31 @@ impl StudioApp {
                         }
                     });
                 });
-                ui.checkbox(&mut self.clip_preview, "Aperçu en boucle sur l'acteur");
+                ui.checkbox(&mut self.clip_preview, tr!("Aperçu en boucle sur l'acteur", "Looping preview on the actor"));
                 // sans aperçu en cours, on ne sait pas encore : la case reste active
                 let has_motion = match &self.preview {
                     Some((i, c, _)) if *i == sel => c.has_root_motion(),
                     _ => true,
                 };
                 ui.add_enabled_ui(has_motion, |ui| {
-                    ui.checkbox(&mut self.clip_root_motion, "Déplacement (le personnage avance)")
-                        .on_hover_text("Applique la trajectoire du clip à la position de l'acteur ; les répétitions s'enchaînent")
-                        .on_disabled_hover_text("Ce clip se joue sur place");
+                    ui.checkbox(&mut self.clip_root_motion, tr!("Déplacement (le personnage avance)", "Root motion (the character moves forward)"))
+                        .on_hover_text(tr!("Applique la trajectoire du clip à la position de l'acteur ; les répétitions s'enchaînent", "Applies the clip's path to the actor's position; loops follow each other"))
+                        .on_disabled_hover_text(tr!("Ce clip se joue sur place", "This clip plays in place"));
                 });
                 match &target_name {
                     None => {
-                        ui.colored_label(Color32::from_rgb(255, 190, 90), "Sélectionnez un personnage dans la scène.");
+                        ui.colored_label(Color32::from_rgb(255, 190, 90), tr!("Sélectionnez un personnage dans la scène.", "Select a character in the scene."));
                     }
                     Some(t) => {
                         let idx = sel;
                         if ui
-                            .button(format!("⬇ Écrire dans la timeline de {t} (dès l'image {})", self.cur_frame()))
-                            .on_hover_text("Crée des clés pour chaque image, à partir de l'image courante")
+                            .button(trf!("⬇ Écrire dans la timeline de {t} (dès l'image {})", "⬇ Write to {t}'s timeline (from frame {})", self.cur_frame()))
+                            .on_hover_text(tr!("Crée des clés pour chaque image, à partir de l'image courante", "Creates keys for every frame, from the current frame"))
                             .clicked()
                         {
                             action = Some((idx, false));
                         }
-                        if ui.button("📌 Garder seulement la pose affichée").on_hover_text("Une seule clé, à l'image courante").clicked() {
+                        if ui.button(tr!("📌 Garder seulement la pose affichée", "📌 Keep only the displayed pose")).on_hover_text(tr!("Une seule clé, à l'image courante", "A single key, on the current frame")).clicked() {
                             action = Some((idx, true));
                         }
                     }
@@ -4500,7 +4593,7 @@ impl StudioApp {
     }
 
     fn scene_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Scène");
+        ui.heading(tr!("Scène", "Scene"));
         let mut select = None;
         let mut toggle_vis = None;
         let mut toggle_expand = None;
@@ -4521,7 +4614,7 @@ impl StudioApp {
             .show(ui, |ui| {
         egui::ScrollArea::vertical().id_salt("actors").auto_shrink([false, false]).show(ui, |ui| {
             if self.scene.actors.is_empty() {
-                ui.label(egui::RichText::new("(vide)").weak());
+                ui.label(egui::RichText::new(tr!("(vide)", "(empty)")).weak());
             }
             // affichage en arbre : chaque enfant sous son parent, quel que soit l'ordre de chargement
             let actors = &self.scene.actors;
@@ -4586,14 +4679,14 @@ impl StudioApp {
                 let a = &actors[r.i];
                 ui.horizontal(|ui| {
                     let eye = if a.visible { "👁" } else { "—" };
-                    let eye_tip = if r.pieces > 0 { "Afficher / masquer (avec ses pièces)" } else { "Afficher / masquer" };
+                    let eye_tip = if r.pieces > 0 { tr!("Afficher / masquer (avec ses pièces)", "Show / hide (with its pieces)") } else { tr!("Afficher / masquer", "Show / hide") };
                     if ui.small_button(eye).on_hover_text(eye_tip).clicked() {
                         toggle_vis = Some(a.id);
                     }
                     ui.add_space(r.depth as f32 * 14.0);
                     if r.pieces > 0 {
                         let arrow = if r.open { "⏷" } else { "⏵" };
-                        let tip = if r.open { "Replier les pièces" } else { "Déplier les pièces" };
+                        let tip = if r.open { tr!("Replier les pièces", "Collapse the pieces") } else { tr!("Déplier les pièces", "Expand the pieces") };
                         if ui.small_button(arrow).on_hover_text(tip).clicked() {
                             toggle_expand = Some(a.id);
                         }
@@ -4617,11 +4710,14 @@ impl StudioApp {
                         ui.separator();
                         let (label, tip) = if r.pieces > 0 {
                             (
-                                format!("🗑 Supprimer le personnage (+{} pièces)", r.pieces),
-                                "Retire de la scène ce personnage et toutes ses pièces attachées (tête, casque, armure, arme...)",
+                                trf!("🗑 Supprimer le personnage (+{} pièces)", "🗑 Delete the character (+{} pieces)", r.pieces),
+                                tr!(
+                                    "Retire de la scène ce personnage et toutes ses pièces attachées (tête, casque, armure, arme...)",
+                                    "Removes this character and all its attached pieces (head, helmet, armor, weapon...) from the scene"
+                                ),
                             )
                         } else {
-                            ("🗑 Supprimer".to_string(), "Retire cet acteur de la scène")
+                            (tr!("🗑 Supprimer", "🗑 Delete").to_string(), tr!("Retire cet acteur de la scène", "Removes this actor from the scene"))
                         };
                         if ui.button(label).on_hover_text(tip).clicked() {
                             delete_req = Some(a.id);
@@ -4667,7 +4763,7 @@ impl StudioApp {
         ui.separator();
 
         let Some(aid) = self.sel_actor else {
-            ui.label("Aucun acteur sélectionné.");
+            ui.label(tr!("Aucun acteur sélectionné.", "No actor selected."));
             return;
         };
         if self.scene.actor(aid).is_none() {
@@ -4727,12 +4823,13 @@ impl StudioApp {
         {
             let a = self.scene.actor_mut(aid).unwrap();
             ui.horizontal(|ui| {
-                ui.label("Nom");
+                ui.label(tr!("Nom", "Name"));
                 ui.add(egui::TextEdit::singleline(&mut a.name).id(egui::Id::new(("actor_name", aid))));
             });
             ui.label(egui::RichText::new(&a.asset).small().weak());
-            ui.label(format!(
+            ui.label(trf!(
                 "{} maillage(s), {} os, {} triangles",
+                "{} mesh(es), {} bones, {} triangles",
                 a.model.meshes.len(),
                 a.model.skeleton.bones.len(),
                 a.model.meshes.iter().map(|m| m.indices.len() / 3).sum::<usize>()
@@ -4741,14 +4838,14 @@ impl StudioApp {
             let cur = a.attachment.clone();
             let name_of = |id: u64| others.iter().find(|o| o.0 == id).map(|o| o.1.clone()).unwrap_or_else(|| "?".into());
             let cur_text = match &cur {
-                None => "Libre".to_string(),
-                Some(Attachment::BoneMerge { parent }) => format!("Fusionné sur {}", name_of(*parent)),
-                Some(Attachment::Bone { parent, bone }) => format!("Attaché à {}.{bone}", name_of(*parent)),
+                None => tr!("Libre", "Free").to_string(),
+                Some(Attachment::BoneMerge { parent }) => trf!("Fusionné sur {}", "Merged onto {}", name_of(*parent)),
+                Some(Attachment::Bone { parent, bone }) => trf!("Attaché à {}.{bone}", "Attached to {}.{bone}", name_of(*parent)),
             };
             ui.horizontal(|ui| {
-                ui.label("Lien");
+                ui.label(tr!("Lien", "Link"));
                 egui::ComboBox::from_id_salt("attach").selected_text(cur_text).width(230.0).show_ui(ui, |ui| {
-                    if ui.selectable_label(cur.is_none(), "Libre").clicked() {
+                    if ui.selectable_label(cur.is_none(), tr!("Libre", "Free")).clicked() {
                         new_attach = Some(None);
                     }
                     let mut prev_rec = false;
@@ -4758,11 +4855,11 @@ impl StudioApp {
                         }
                         prev_rec = *rec;
                         let star = if *rec { "⭐ " } else { "" };
-                        if ui.selectable_label(false, format!("{star}Fusionner sur {oname}")).clicked() {
+                        if ui.selectable_label(false, trf!("{star}Fusionner sur {oname}", "{star}Merge onto {oname}")).clicked() {
                             new_attach = Some(Some(Attachment::BoneMerge { parent: *oid }));
                         }
                         for bone in ["R_WEAPON", "L_WEAPON", "HEAD", "SPINEUPPER", "PELVIS"] {
-                            if ui.selectable_label(false, format!("Attacher à {oname}.{bone}")).clicked() {
+                            if ui.selectable_label(false, trf!("Attacher à {oname}.{bone}", "Attach to {oname}.{bone}")).clicked() {
                                 new_attach = Some(Some(Attachment::Bone { parent: *oid, bone: bone.into() }));
                             }
                         }
@@ -4775,7 +4872,7 @@ impl StudioApp {
             let mut rot = euler_deg_from_quat(t.rotation);
             let mut scale = t.scale.x;
             let mut changed = false;
-            ui.label(if a.attachment.is_some() { "Décalage par rapport au parent" } else { "Position / orientation" });
+            ui.label(if a.attachment.is_some() { tr!("Décalage par rapport au parent", "Offset from the parent") } else { "Position / orientation" });
             ui.horizontal(|ui| {
                 ui.label("Pos");
                 changed |= ui.add(crate::calc::drag(&mut pos.x).speed(0.01).prefix("x ")).changed();
@@ -4789,9 +4886,9 @@ impl StudioApp {
                 changed |= ui.add(crate::calc::drag(&mut rot.z).speed(0.5).suffix("°")).changed();
             });
             ui.horizontal(|ui| {
-                ui.label("Échelle");
+                ui.label(tr!("Échelle", "Scale"));
                 changed |= ui.add(crate::calc::drag(&mut scale).speed(0.01).range(0.01..=100.0)).changed();
-                if ui.button("🗑 Supprimer l'acteur").clicked() {
+                if ui.button(tr!("🗑 Supprimer l'acteur", "🗑 Delete actor")).clicked() {
                     delete = true;
                 }
             });
@@ -4836,12 +4933,12 @@ impl StudioApp {
 
         // ---- os
         ui.horizontal(|ui| {
-            ui.heading("Os");
-            if ui.selectable_label(self.sel_bone.is_none(), "(racine de l'acteur)").clicked() {
+            ui.heading(tr!("Os", "Bones"));
+            if ui.selectable_label(self.sel_bone.is_none(), tr!("(racine de l'acteur)", "(actor root)")).clicked() {
                 self.sel_bone = None;
             }
         });
-        ui.add(egui::TextEdit::singleline(&mut self.bone_filter).id(egui::Id::new("bone_filter")).hint_text("filtrer les os"));
+        ui.add(egui::TextEdit::singleline(&mut self.bone_filter).id(egui::Id::new("bone_filter")).hint_text(tr!("filtrer les os", "filter bones")));
         egui::ScrollArea::vertical().id_salt("bones").max_height(300.0).show(ui, |ui| {
             if self.bone_filter.trim().is_empty() {
                 let roots: Vec<usize> = self
@@ -4887,7 +4984,7 @@ impl StudioApp {
                     if matches!(a.attachment, Some(Attachment::BoneMerge { .. })) {
                         ui.colored_label(
                             Color32::from_rgb(255, 190, 90),
-                            "Acteur fusionné : animez plutôt l'acteur parent.",
+                            tr!("Acteur fusionné : animez plutôt l'acteur parent.", "Merged actor: animate the parent actor instead."),
                         );
                     }
                     let t = a.pose[b];
@@ -4920,20 +5017,20 @@ impl StudioApp {
                 self.scene.update_world();
             }
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Réinitialiser l'os").clicked() {
+                if ui.button(tr!("Réinitialiser l'os", "Reset bone")).clicked() {
                     self.reset_bone(false);
                 }
-                if ui.button("Réinitialiser la pose").clicked() {
+                if ui.button(tr!("Réinitialiser la pose", "Reset pose")).clicked() {
                     self.reset_bone(true);
                 }
             });
         }
         ui.add_space(4.0);
-        ui.label(egui::RichText::new("📋 Copier-coller de pose").strong());
+        ui.label(egui::RichText::new(tr!("📋 Copier-coller de pose", "📋 Pose copy-paste")).strong());
         let op = ui.horizontal_wrapped(|ui| pose_buttons(ui, self.clipboard_pose.as_ref(), true)).inner;
         if let Some(c) = &self.clipboard_pose {
             ui.label(
-                egui::RichText::new(format!("Copié : « {} », image {} ({} clés d'animation)", c.from, c.frame, c.key_count()))
+                egui::RichText::new(trf!("Copié : « {} », image {} ({} clés d'animation)", "Copied: “{}”, frame {} ({} animation keys)", c.from, c.frame, c.key_count()))
                     .weak()
                     .small(),
             );
@@ -4945,30 +5042,30 @@ impl StudioApp {
 
     fn timeline_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button("⏮").on_hover_text("Début").clicked() {
+            if ui.button("⏮").on_hover_text(tr!("Début", "Start")).clicked() {
                 self.playing = false;
                 self.set_frame(self.start as f32);
             }
-            if ui.button("◀").on_hover_text("Image précédente (←)").clicked() {
+            if ui.button("◀").on_hover_text(tr!("Image précédente (←)", "Previous frame (←)")).clicked() {
                 self.playing = false;
                 self.set_frame((self.cur_frame() - 1).max(self.start) as f32);
             }
             let play = if self.playing { "⏸" } else { "▶" };
-            if ui.button(play).on_hover_text(format!("Lecture / pause ({})", self.config.keymap.label(Action::PlayPause))).clicked() {
+            if ui.button(play).on_hover_text(trf!("Lecture / pause ({})", "Play / pause ({})", self.config.keymap.label(Action::PlayPause))).clicked() {
                 self.toggle_play();
             }
-            if ui.button("▶|").on_hover_text("Image suivante (→)").clicked() {
+            if ui.button("▶|").on_hover_text(tr!("Image suivante (→)", "Next frame (→)")).clicked() {
                 self.playing = false;
                 self.set_frame((self.cur_frame() + 1).min(self.end) as f32);
             }
-            if ui.button("⏭").on_hover_text("Fin").clicked() {
+            if ui.button("⏭").on_hover_text(tr!("Fin", "End")).clicked() {
                 self.playing = false;
                 self.set_frame(self.end as f32);
             }
-            ui.checkbox(&mut self.looping, "Boucle");
+            ui.checkbox(&mut self.looping, tr!("Boucle", "Loop"));
             ui.separator();
             let mut f = self.cur_frame();
-            if ui.add(crate::calc::drag(&mut f).prefix("Image ").range(self.start..=self.end)).changed() {
+            if ui.add(crate::calc::drag(&mut f).prefix(tr!("Image ", "Frame ")).range(self.start..=self.end)).changed() {
                 self.playing = false;
                 self.set_frame(f as f32);
             }
@@ -4983,37 +5080,37 @@ impl StudioApp {
                 ms_total % 1000
             );
             ui.label(egui::RichText::new(tc).monospace().strong())
-                .on_hover_text("Temps écoulé depuis Début (HH:MM:SS:millisecondes)");
-            ui.add(crate::calc::drag(&mut self.start).prefix("Début ").range(-10000..=self.end - 1));
-            ui.add(crate::calc::drag(&mut self.end).prefix("Fin ").range(self.start + 1..=100000));
-            ui.add(crate::calc::drag(&mut self.fps).suffix(" ips").range(1.0..=240.0));
+                .on_hover_text(tr!("Temps écoulé depuis Début (HH:MM:SS:millisecondes)", "Time elapsed since Start (HH:MM:SS:milliseconds)"));
+            ui.add(crate::calc::drag(&mut self.start).prefix(tr!("Début ", "Start ")).range(-10000..=self.end - 1));
+            ui.add(crate::calc::drag(&mut self.end).prefix(tr!("Fin ", "End ")).range(self.start + 1..=100000));
+            ui.add(crate::calc::drag(&mut self.fps).suffix(tr!(" ips", " fps")).range(1.0..=240.0));
             ui.separator();
             egui::ComboBox::from_id_salt("interp").selected_text(self.interp.label()).width(80.0).show_ui(ui, |ui| {
                 for i in Interp::ALL {
                     ui.selectable_value(&mut self.interp, i, i.label());
                 }
             });
-            if ui.button("🔑 Clé").on_hover_text(format!("Poser une clé sur la sélection ({})", self.config.keymap.label(Action::SetKey))).clicked() {
+            if ui.button(tr!("🔑 Clé", "🔑 Key")).on_hover_text(trf!("Poser une clé sur la sélection ({})", "Set a key on the selection ({})", self.config.keymap.label(Action::SetKey))).clicked() {
                 self.key_selection();
             }
-            if ui.button("🔑 Pose entière").on_hover_text("Clé sur tous les os de l'acteur").clicked() {
+            if ui.button(tr!("🔑 Pose entière", "🔑 Whole pose")).on_hover_text(tr!("Clé sur tous les os de l'acteur", "Key on all of the actor's bones")).clicked() {
                 self.key_all_bones();
             }
-            if ui.button("✖ Suppr. clé").on_hover_text("Supprimer la clé à l'image courante").clicked() {
+            if ui.button(tr!("✖ Suppr. clé", "✖ Del. key")).on_hover_text(tr!("Supprimer la clé à l'image courante", "Delete the key on the current frame")).clicked() {
                 self.delete_key();
             }
             if ui
-                .add_enabled(self.sel_actor.is_some(), egui::Button::new("🗑 Tout effacer"))
-                .on_hover_text("Effacer toutes les clés de l'acteur sélectionné (racine et tous les os).\nL'acteur garde la pose de l'image courante. Ctrl+Z pour annuler.")
+                .add_enabled(self.sel_actor.is_some(), egui::Button::new(tr!("🗑 Tout effacer", "🗑 Erase all")))
+                .on_hover_text(tr!("Effacer toutes les clés de l'acteur sélectionné (racine et tous les os).\nL'acteur garde la pose de l'image courante. Ctrl+Z pour annuler.", "Erase all keys of the selected actor (root and all bones).\nThe actor keeps the pose of the current frame. Ctrl+Z to undo."))
                 .clicked()
             {
                 self.clear_actor_keys();
             }
             ui.separator();
-            ui.label("🎥 Prise :");
+            ui.label(tr!("🎥 Prise :", "🎥 Shot:"));
             if ui
-                .button("📷 Copier la vue")
-                .on_hover_text("Place la caméra de prise exactement comme la vue de travail\n(clé à l'image courante si elle est animée)")
+                .button(tr!("📷 Copier la vue", "📷 Copy view"))
+                .on_hover_text(tr!("Place la caméra de prise exactement comme la vue de travail\n(clé à l'image courante si elle est animée)", "Puts the shot camera exactly like the work view\n(key on the current frame if it is animated)"))
                 .clicked()
             {
                 self.shot_from_work();
@@ -5027,12 +5124,16 @@ impl StudioApp {
             .fill(if self.cam_rec_armed { Color32::from_rgb(190, 40, 40) } else { Color32::TRANSPARENT });
             if ui
                 .add(rec_btn)
-                .on_hover_text(
+                .on_hover_text(tr!(
                     "Enregistrement en direct de la caméra de prise.\n\
                      Armé, piloter la caméra (ZQSD, clic droit, Alt+glisser) lance la lecture et enregistre \
                      une clé par image ; lâcher les commandes arrête la prise.\n\
                      Les mouvements brusques sont adoucis (réglage « Stabilisation » du menu 🚁).",
-                )
+                    "Live recording of the shot camera.\n\
+                     When armed, driving the camera (WASD, right click, Alt+drag) starts playback and records \
+                     one key per frame; letting go of the controls ends the take.\n\
+                     Sudden moves are smoothed (“Stabilization” setting in the 🚁 menu)."
+                ))
                 .clicked()
             {
                 if self.cam_rec.is_some() {
@@ -5041,21 +5142,23 @@ impl StudioApp {
                 self.cam_rec_armed = !self.cam_rec_armed;
                 if self.cam_rec_armed {
                     self.shot_view = true;
-                    self.status = "Enregistrement armé : pilotez la caméra pour enregistrer.".into();
+                    self.status = tr!("Enregistrement armé : pilotez la caméra pour enregistrer.", "Recording armed: drive the camera to record.").into();
                 }
             }
             if ui
-                .button("🔑 Clé")
-                .on_hover_text(
+                .button(tr!("🔑 Clé", "🔑 Key"))
+                .on_hover_text(tr!(
                     "Pose une clé de caméra de prise à l'image courante : elle devient animée.\n\
                      En mode Travail, la clé reprend la vue de travail ; en mode Prise, la caméra de prise.",
-                )
+                    "Sets a shot camera key on the current frame: it becomes animated.\n\
+                     In Work mode, the key takes the work view; in Shot mode, the shot camera."
+                ))
                 .clicked()
             {
                 self.key_camera();
             }
             let has_cam = !self.scene.camera.keys.is_empty();
-            if has_cam && ui.small_button("✖ clé").on_hover_text("Supprimer la clé de caméra à l'image courante").clicked() {
+            if has_cam && ui.small_button(tr!("✖ clé", "✖ key")).on_hover_text(tr!("Supprimer la clé de caméra à l'image courante", "Delete the camera key on the current frame")).clicked() {
                 self.begin_edit();
                 let f = self.cur_frame();
                 self.scene.camera.remove_key(f);
@@ -5063,8 +5166,8 @@ impl StudioApp {
             }
             if has_cam
                 && ui
-                    .small_button("🗑 tout")
-                    .on_hover_text("Effacer toutes les clés de caméra : elle reste fixe à sa position actuelle.\nCtrl+Z pour annuler.")
+                    .small_button(tr!("🗑 tout", "🗑 all"))
+                    .on_hover_text(tr!("Effacer toutes les clés de caméra : elle reste fixe à sa position actuelle.\nCtrl+Z pour annuler.", "Erase all camera keys: it stays still at its current position.\nCtrl+Z to undo."))
                     .clicked()
             {
                 self.clear_camera_keys();
@@ -5072,7 +5175,7 @@ impl StudioApp {
             let mut fov = self.shot_params(self.frame).fov_deg;
             if ui
                 .add(crate::calc::drag(&mut fov).range(5.0..=120.0).speed(0.3).suffix("°"))
-                .on_hover_text("Champ de vision de la caméra de prise")
+                .on_hover_text(tr!("Champ de vision de la caméra de prise", "Shot camera field of view"))
                 .changed()
             {
                 self.playing = false;
@@ -5084,31 +5187,31 @@ impl StudioApp {
             let (fw, fh) = self.shot_format();
             ui.menu_button(format!("▭ {fw}×{fh}"), |ui| {
                 ui.set_min_width(300.0);
-                ui.label(egui::RichText::new("Format de prise de vue").strong());
+                ui.label(egui::RichText::new(tr!("Format de prise de vue", "Shot format")).strong());
                 self.shot_format_editor(ui, false);
                 ui.label(
-                    egui::RichText::new("Cadre de la vue « Prise » et proportions des vidéos et des photos (enregistré dans le projet).")
+                    egui::RichText::new(tr!("Cadre de la vue « Prise » et proportions des vidéos et des photos (enregistré dans le projet).", "Frame of the “Shot” view and proportions of videos and photos (saved in the project)."))
                         .small()
                         .weak(),
                 );
             })
             .response
-            .on_hover_text("Format de prise de vue de la caméra (largeur × hauteur)");
-            if ui.button("🛠 ← prise").on_hover_text("Amène la vue de travail sur la caméra de prise").clicked() {
+            .on_hover_text(tr!("Format de prise de vue de la caméra (largeur × hauteur)", "Camera shot format (width × height)"));
+            if ui.button(tr!("🛠 ← prise", "🛠 ← shot")).on_hover_text(tr!("Amène la vue de travail sur la caméra de prise", "Brings the work view to the shot camera")).clicked() {
                 self.work_from_shot();
             }
             ui.separator();
-            ui.label("☀ Soleil :");
+            ui.label(tr!("☀ Soleil :", "☀ Sun:"));
             if ui
-                .button("🔑 Clé")
-                .on_hover_text("Pose une clé de soleil à l'image courante (réglages dans Affichage > Soleil)")
+                .button(tr!("🔑 Clé", "🔑 Key"))
+                .on_hover_text(tr!("Pose une clé de soleil à l'image courante (réglages dans Affichage > Soleil)", "Sets a sun key on the current frame (settings in View > Sun)"))
                 .clicked()
             {
                 self.key_sun();
             }
             let cur = self.cur_frame();
             if self.scene.sun.key_at(cur).is_some()
-                && ui.small_button("✖ clé").on_hover_text("Supprimer la clé de soleil à l'image courante").clicked()
+                && ui.small_button(tr!("✖ clé", "✖ key")).on_hover_text(tr!("Supprimer la clé de soleil à l'image courante", "Delete the sun key on the current frame")).clicked()
             {
                 self.delete_sun_key(cur);
             }
@@ -5246,21 +5349,21 @@ impl StudioApp {
         painter.text(
             Pos2::new(rect.min.x + 6.0, rows_y[1]),
             egui::Align2::LEFT_CENTER,
-            "Caméra",
+            tr!("Caméra", "Camera"),
             egui::FontId::proportional(12.0),
             Color32::from_gray(200),
         );
         painter.text(
             Pos2::new(rect.min.x + 6.0, rows_y[2]),
             egui::Align2::LEFT_CENTER,
-            "☀ Soleil",
+            tr!("☀ Soleil", "☀ Sun"),
             egui::FontId::proportional(12.0),
             Color32::from_gray(200),
         );
         painter.text(
             Pos2::new(rect.min.x + 6.0, rows_y[3]),
             egui::Align2::LEFT_CENTER,
-            "🌄 Ambiance",
+            tr!("🌄 Ambiance", "🌄 Ambiance"),
             egui::FontId::proportional(12.0),
             Color32::from_gray(200),
         );
@@ -5520,8 +5623,8 @@ impl StudioApp {
             }
         }
         bresp.on_hover_text(
-            "Zoom de la timeline : glisser un rond pour zoomer, le milieu pour défiler.\n\
-             Double-clic : tout afficher. Sur les pistes : Ctrl/Alt + molette = zoom, molette = défiler.",
+            tr!("Zoom de la timeline : glisser un rond pour zoomer, le milieu pour défiler.\n\
+             Double-clic : tout afficher. Sur les pistes : Ctrl/Alt + molette = zoom, molette = défiler.", "Timeline zoom: drag a dot to zoom, the middle to scroll.\nDouble-click: show all. On the tracks: Ctrl/Alt + wheel = zoom, wheel = scroll."),
         );
 
         // molette sur les pistes ou la barre : Ctrl/Alt = zoom autour de la souris, sinon défilement
@@ -5624,11 +5727,11 @@ impl StudioApp {
     fn file_dialog_ui(&mut self, ctx: &egui::Context) {
         let Some(kind) = &self.dialog else { return };
         let saving = *kind == Dialog::Save;
-        let title = if saving { "Enregistrer le projet" } else { "Ouvrir un projet" };
+        let title = if saving { tr!("Enregistrer le projet", "Save project") } else { tr!("Ouvrir un projet", "Open project") };
         let mut close = false;
         let mut action = false;
-        egui::Window::new(title).collapsible(false).resizable(false).show(ctx, |ui| {
-            ui.label("Chemin du fichier projet (.psproj) :");
+        egui::Window::new(title).id(egui::Id::new("project_dialog")).collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.label(tr!("Chemin du fichier projet (.psproj) :", "Project file path (.psproj):"));
             ui.add(egui::TextEdit::singleline(&mut self.project_path).desired_width(480.0));
             if let Ok(rd) = std::fs::read_dir(projects_dir()) {
                 let files: Vec<PathBuf> = rd
@@ -5636,7 +5739,7 @@ impl StudioApp {
                     .filter(|p| p.extension().is_some_and(|e| e == "psproj"))
                     .collect();
                 if !files.is_empty() {
-                    ui.label("Projets dans Documents/PlanetStudio :");
+                    ui.label(tr!("Projets dans Documents/PlanetStudio :", "Projects in Documents/PlanetStudio:"));
                     for f in files {
                         if ui.selectable_label(false, f.file_name().unwrap_or_default().to_string_lossy()).clicked() {
                             self.project_path = f.display().to_string();
@@ -5645,10 +5748,10 @@ impl StudioApp {
                 }
             }
             ui.horizontal(|ui| {
-                if ui.button(if saving { "Enregistrer" } else { "Ouvrir" }).clicked() {
+                if ui.button(if saving { tr!("Enregistrer", "Save") } else { tr!("Ouvrir", "Open") }).clicked() {
                     action = true;
                 }
-                if ui.button("Annuler").clicked() {
+                if ui.button(tr!("Annuler", "Cancel")).clicked() {
                     close = true;
                 }
             });
@@ -5899,10 +6002,10 @@ fn wrap_deg(a: f32) -> f32 {
 fn pose_buttons(ui: &mut egui::Ui, clip: Option<&PoseClipboard>, can_copy: bool) -> Option<PoseOp> {
     let mut op = None;
     let has = clip.is_some();
-    let from = clip.map(|c| format!(" de « {} »", c.from)).unwrap_or_default();
+    let from = clip.map(|c| trf!(" de « {} »", " of “{}”", c.from)).unwrap_or_default();
     if ui
-        .add_enabled(can_copy, egui::Button::new("Copier la pose").shortcut_text("Ctrl+C"))
-        .on_hover_text("Copie la pose du personnage (avec toute son animation et sa position) pour la coller sur un autre")
+        .add_enabled(can_copy, egui::Button::new(tr!("Copier la pose", "Copy pose")).shortcut_text("Ctrl+C"))
+        .on_hover_text(tr!("Copie la pose du personnage (avec toute son animation et sa position) pour la coller sur un autre", "Copies the character's pose (with all its animation and its position) to paste it onto another"))
         .clicked()
     {
         op = Some(PoseOp::Copy);
@@ -5910,28 +6013,34 @@ fn pose_buttons(ui: &mut egui::Ui, clip: Option<&PoseClipboard>, can_copy: bool)
     let paste = |ui: &mut egui::Ui, label: &str, short: &str, tip: String| {
         ui.add_enabled(has, egui::Button::new(label).shortcut_text(short))
             .on_hover_text(tip)
-            .on_disabled_hover_text("Copiez d'abord la pose d'un personnage")
+            .on_disabled_hover_text(tr!("Copiez d'abord la pose d'un personnage", "First copy a character's pose"))
             .clicked()
     };
-    if paste(ui, "Coller la pose", "Ctrl+V", format!("Pose{from} posée en clé à l'image courante")) {
+    if paste(ui, tr!("Coller la pose", "Paste pose"), "Ctrl+V", trf!("Pose{from} posée en clé à l'image courante", "Pose{from} set as a key on the current frame")) {
         op = Some(PoseOp::Paste);
     }
-    if paste(ui, "Coller en miroir", "Ctrl+Maj+V", format!("Pose{from} inversée gauche / droite, à l'image courante")) {
+    if paste(ui, tr!("Coller en miroir", "Paste mirrored"), tr!("Ctrl+Maj+V", "Ctrl+Shift+V"), trf!("Pose{from} inversée gauche / droite, à l'image courante", "Pose{from} flipped left / right, on the current frame")) {
         op = Some(PoseOp::PasteMirror);
     }
     if paste(
         ui,
-        "Coller l'animation",
+        tr!("Coller l'animation", "Paste animation"),
         "",
-        format!("Remplace toutes les clés des os par celles{from} (la position du personnage ne change pas)"),
+        trf!(
+            "Remplace toutes les clés des os par celles{from} (la position du personnage ne change pas)",
+            "Replaces all bone keys with those{from} (the character's position does not change)"
+        ),
     ) {
         op = Some(PoseOp::PasteAnim);
     }
     if paste(
         ui,
-        "Coller la position",
+        tr!("Coller la position", "Paste position"),
         "",
-        format!("Place le personnage à l'endroit et dans l'orientation{from}, à l'image courante (la pose ne change pas)"),
+        trf!(
+            "Place le personnage à l'endroit et dans l'orientation{from}, à l'image courante (la pose ne change pas)",
+            "Puts the character at the place and orientation{from}, on the current frame (the pose does not change)"
+        ),
     ) {
         op = Some(PoseOp::PastePosition);
     }
@@ -5963,22 +6072,22 @@ pub(super) fn post_fx_controls(ui: &mut egui::Ui, fx: &mut crate::post::PostFx) 
     use crate::post::{PostFx, ToneMap};
     ui.horizontal(|ui| {
         ui.label("Ambiance");
-        if ui.selectable_label(*fx == PostFx::default(), "Neutre").on_hover_text("Image telle que rendue").clicked() {
+        if ui.selectable_label(*fx == PostFx::default(), tr!("Neutre", "Neutral")).on_hover_text(tr!("Image telle que rendue", "Image as rendered")).clicked() {
             *fx = PostFx::default();
         }
         if ui
-            .selectable_label(*fx == PostFx::cinema(), "Cinéma")
-            .on_hover_text("Courbe filmique, un peu de contraste, vignettage, grain et netteté")
+            .selectable_label(*fx == PostFx::cinema(), tr!("Cinéma", "Cinema"))
+            .on_hover_text(tr!("Courbe filmique, un peu de contraste, vignettage, grain et netteté", "Filmic curve, a little contrast, vignette, grain and sharpness"))
             .clicked()
         {
             // garde la profondeur de champ en cours
             *fx = PostFx { dof: fx.dof, focus_auto: fx.focus_auto, focus: fx.focus, blur: fx.blur, ..PostFx::cinema() };
         }
         if ui
-            .selectable_label(*fx == PostFx::game(), "Jeu (live)")
+            .selectable_label(*fx == PostFx::game(), tr!("Jeu (live)", "Game (live)"))
             .on_hover_text(
-                "Calé sur des captures d'Indar du jeu : hautes lumières adoucies, dominante rose-lavande, \
-                 ombres un peu plus profondes. À utiliser avec le ciel et le brouillard de la carte",
+                tr!("Calé sur des captures d'Indar du jeu : hautes lumières adoucies, dominante rose-lavande, \
+                 ombres un peu plus profondes. À utiliser avec le ciel et le brouillard de la carte", "Matched to in-game captures of Indar: softened highlights, pink-lavender cast, slightly deeper shadows. Use with the map's sky and fog"),
             )
             .clicked()
         {
@@ -5987,19 +6096,21 @@ pub(super) fn post_fx_controls(ui: &mut egui::Ui, fx: &mut crate::post::PostFx) 
     });
     ui.separator();
     egui::Grid::new("postfx").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-        ui.label(egui::RichText::new("Étalonnage").strong());
+        ui.label(egui::RichText::new(tr!("Étalonnage", "Color grading")).strong());
         ui.end_row();
-        ui.label("Exposition");
+        ui.label(tr!("Exposition", "Exposure"));
         ui.add(egui::Slider::new(&mut fx.exposure, -3.0..=3.0).suffix(" IL"))
-            .on_hover_text("+1 : deux fois plus clair (en lumière, avant la courbe)");
+            .on_hover_text(tr!("+1 : deux fois plus clair (en lumière, avant la courbe)", "+1: twice as bright (in light, before the curve)"));
         ui.end_row();
-        ui.label("Étalonnage du jeu");
-        ui.checkbox(&mut fx.game_grading, "Selon l'heure de la carte").on_hover_text(
+        ui.label(tr!("Étalonnage du jeu", "Game color grading"));
+        ui.checkbox(&mut fx.game_grading, tr!("Selon l'heure de la carte", "From the map's hour")).on_hover_text(tr!(
             "Comme le jeu : rendu des tons dont le point blanc suit l'heure du ciel de la carte (plein jour, \
              coucher, nuit), puis sa table d'étalonnage de l'heure. Remplace le rendu des tons ci-dessous",
-        );
+            "Like the game: tone mapping whose white point follows the hour of the map's sky (daylight, \
+             sunset, night), then its color grading table for that hour. Replaces the tone mapping below"
+        ));
         ui.end_row();
-        ui.label("Rendu des tons");
+        ui.label(tr!("Rendu des tons", "Tone mapping"));
         ui.add_enabled_ui(!fx.game_grading, |ui| {
             egui::ComboBox::from_id_salt("tonemap").selected_text(fx.tonemap.label()).show_ui(ui, |ui| {
                 for t in ToneMap::ALL {
@@ -6007,43 +6118,43 @@ pub(super) fn post_fx_controls(ui: &mut egui::Ui, fx: &mut crate::post::PostFx) 
                 }
             })
             .response
-            .on_hover_text("Ramène les lumières très fortes (lune, soleil, néons) vers le blanc en douceur, au lieu de les écrêter");
+            .on_hover_text(tr!("Ramène les lumières très fortes (lune, soleil, néons) vers le blanc en douceur, au lieu de les écrêter", "Brings very strong lights (moon, sun, neons) smoothly toward white, instead of clipping them"));
         });
         ui.end_row();
-        ui.label("Contraste");
+        ui.label(tr!("Contraste", "Contrast"));
         ui.add(egui::Slider::new(&mut fx.contrast, 0.5..=1.8));
         ui.end_row();
         ui.label("Saturation");
         ui.add(egui::Slider::new(&mut fx.saturation, 0.0..=2.0));
         ui.end_row();
-        ui.label("Température");
-        ui.add(egui::Slider::new(&mut fx.temperature, -1.0..=1.0)).on_hover_text("Froid (bleu) ↔ chaud (orangé)");
+        ui.label(tr!("Température", "Temperature"));
+        ui.add(egui::Slider::new(&mut fx.temperature, -1.0..=1.0)).on_hover_text(tr!("Froid (bleu) ↔ chaud (orangé)", "Cool (blue) ↔ warm (orange)"));
         ui.end_row();
-        ui.label("Teinte");
-        ui.add(egui::Slider::new(&mut fx.tint, -1.0..=1.0)).on_hover_text("Vert ↔ magenta");
+        ui.label(tr!("Teinte", "Tint"));
+        ui.add(egui::Slider::new(&mut fx.tint, -1.0..=1.0)).on_hover_text(tr!("Vert ↔ magenta", "Green ↔ magenta"));
         ui.end_row();
 
-        ui.label(egui::RichText::new("Objectif").strong());
+        ui.label(egui::RichText::new(tr!("Objectif", "Lens")).strong());
         ui.end_row();
-        ui.label("Vignettage");
-        ui.add(egui::Slider::new(&mut fx.vignette, 0.0..=1.0)).on_hover_text("Assombrit les bords de l'image");
+        ui.label(tr!("Vignettage", "Vignette"));
+        ui.add(egui::Slider::new(&mut fx.vignette, 0.0..=1.0)).on_hover_text(tr!("Assombrit les bords de l'image", "Darkens the edges of the image"));
         ui.end_row();
         ui.label("Grain");
-        ui.add(egui::Slider::new(&mut fx.grain, 0.0..=1.0)).on_hover_text("Grain de pellicule, un par pixel de l'image exportée");
+        ui.add(egui::Slider::new(&mut fx.grain, 0.0..=1.0)).on_hover_text(tr!("Grain de pellicule, un par pixel de l'image exportée", "Film grain, one per pixel of the exported image"));
         ui.end_row();
-        ui.label("Netteté");
+        ui.label(tr!("Netteté", "Sharpness"));
         ui.add(egui::Slider::new(&mut fx.sharpen, 0.0..=1.0))
-            .on_hover_text("Fait ressortir les détails fins ; dans les exports, appliquée après la réduction du suréchantillonnage");
+            .on_hover_text(tr!("Fait ressortir les détails fins ; dans les exports, appliquée après la réduction du suréchantillonnage", "Brings out fine details; in exports, applied after the supersampling downscale"));
         ui.end_row();
 
-        ui.label(egui::RichText::new("Profondeur de champ").strong());
-        ui.checkbox(&mut fx.dof, "Active");
+        ui.label(egui::RichText::new(tr!("Profondeur de champ", "Depth of field")).strong());
+        ui.checkbox(&mut fx.dof, tr!("Active", "On"));
         ui.end_row();
-        ui.label("Mise au point");
+        ui.label(tr!("Mise au point", "Focus"));
         ui.add_enabled_ui(fx.dof, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut fx.focus_auto, true, "Cible de la caméra")
-                    .on_hover_text("Le point visé par la caméra est net (il suit la caméra animée)");
+                ui.selectable_value(&mut fx.focus_auto, true, tr!("Cible de la caméra", "Camera target"))
+                    .on_hover_text(tr!("Le point visé par la caméra est net (il suit la caméra animée)", "The camera's target point is sharp (it follows the animated camera)"));
                 ui.selectable_value(&mut fx.focus_auto, false, "Distance");
                 ui.add_enabled(
                     !fx.focus_auto,
@@ -6052,9 +6163,9 @@ pub(super) fn post_fx_controls(ui: &mut egui::Ui, fx: &mut crate::post::PostFx) 
             });
         });
         ui.end_row();
-        ui.label("Flou du fond");
+        ui.label(tr!("Flou du fond", "Background blur"));
         ui.add_enabled(fx.dof, egui::Slider::new(&mut fx.blur, 0.1..=3.0).suffix(" %"))
-            .on_hover_text("Flou de l'arrière-plan lointain, en % de la hauteur de l'image ; le premier plan peut l'être davantage");
+            .on_hover_text(tr!("Flou de l'arrière-plan lointain, en % de la hauteur de l'image ; le premier plan peut l'être davantage", "Blur of the far background, in % of the image height; the foreground can be blurrier"));
         ui.end_row();
     });
 }
@@ -6091,7 +6202,7 @@ impl eframe::App for StudioApp {
             if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("fbx")) {
                 self.import_fbx(p);
             } else {
-                self.status = format!("{} : seuls les .fbx (animations) se déposent ici", p.display());
+                self.status = trf!("{} : seuls les .fbx (animations) se déposent ici", "{}: only .fbx files (animations) can be dropped here", p.display());
             }
         }
         self.sync_lighting();
@@ -6140,32 +6251,32 @@ impl eframe::App for StudioApp {
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.menu_button("Fichier", |ui| {
-                    if ui.button("Nouveau projet").clicked() {
+                ui.menu_button(tr!("Fichier", "File"), |ui| {
+                    if ui.button(tr!("Nouveau projet", "New project")).clicked() {
                         self.new_project();
                         ui.close_menu();
                     }
-                    if ui.button("Ouvrir un projet...").clicked() {
+                    if ui.button(tr!("Ouvrir un projet...", "Open project...")).clicked() {
                         if let Some(p) = &self.config.last_project {
                             self.project_path = p.clone();
                         }
                         self.dialog = Some(Dialog::Open);
                         ui.close_menu();
                     }
-                    if ui.button(format!("Enregistrer le projet...  ({})", self.config.keymap.label(Action::Save))).clicked() {
+                    if ui.button(trf!("Enregistrer le projet...  ({})", "Save project...  ({})", self.config.keymap.label(Action::Save))).clicked() {
                         self.dialog = Some(Dialog::Save);
                         ui.close_menu();
                     }
                     let mut changed = ui
-                        .checkbox(&mut self.config.autosave.enabled, "Enregistrement automatique")
+                        .checkbox(&mut self.config.autosave.enabled, tr!("Enregistrement automatique", "Autosave"))
                         .on_hover_text(
-                            "Enregistre le projet à intervalle régulier et à la fermeture de l'application, \
-                             dans son fichier (ou dans Documents/PlanetStudio/sans_titre_N.psproj s'il n'a pas encore de nom)",
+                            tr!("Enregistre le projet à intervalle régulier et à la fermeture de l'application, \
+                             dans son fichier (ou dans Documents/PlanetStudio/sans_titre_N.psproj s'il n'a pas encore de nom)", "Saves the project at regular intervals and when the application closes, to its file (or to Documents/PlanetStudio/sans_titre_N.psproj if it has no name yet)"),
                         )
                         .changed();
                     ui.add_enabled_ui(self.config.autosave.enabled, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label("    toutes les");
+                            ui.label(tr!("    toutes les", "    every"));
                             changed |= ui
                                 .add(crate::calc::drag(&mut self.config.autosave.minutes).range(1..=60).suffix(" min"))
                                 .changed();
@@ -6177,34 +6288,34 @@ impl eframe::App for StudioApp {
                     }
                     ui.separator();
                     if ui
-                        .button(format!("📸 Prendre une photo  ({})", self.config.keymap.label(Action::Photo)))
-                        .on_hover_text("Image courante, par la caméra de prise, avec les réglages de l'onglet Image de la fenêtre Exporter")
+                        .button(trf!("📸 Prendre une photo  ({})", "📸 Take a photo  ({})", self.config.keymap.label(Action::Photo)))
+                        .on_hover_text(tr!("Image courante, par la caméra de prise, avec les réglages de l'onglet Image de la fenêtre Exporter", "Current frame, from the shot camera, with the settings of the Image tab of the Export window"))
                         .clicked()
                     {
                         self.take_photo();
                         ui.close_menu();
                     }
-                    if ui.button("🎬 Exporter une vidéo… (H.264, AV1, GIF, images)").clicked() {
+                    if ui.button(tr!("🎬 Exporter une vidéo… (H.264, AV1, GIF, images)", "🎬 Export a video… (H.264, AV1, GIF, images)")).clicked() {
                         self.open_export(ExportTab::Video);
                         ui.close_menu();
                     }
-                    if ui.button("🖼 Exporter une image…").clicked() {
+                    if ui.button(tr!("🖼 Exporter une image…", "🖼 Export an image…")).clicked() {
                         self.open_export(ExportTab::Image);
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("📁 Changer de dossier de jeu…").clicked() {
+                    if ui.button(tr!("📁 Changer de dossier de jeu…", "📁 Change game folder…")).clicked() {
                         self.game_error = None;
                         self.game_setup = true;
                         ui.close_menu();
                     }
                 });
-                ui.menu_button("Édition", |ui| {
-                    if ui.button(format!("Annuler  ({})", self.config.keymap.label(Action::Undo))).clicked() {
+                ui.menu_button(tr!("Édition", "Edit"), |ui| {
+                    if ui.button(trf!("Annuler  ({})", "Undo  ({})", self.config.keymap.label(Action::Undo))).clicked() {
                         self.undo_redo(false);
                         ui.close_menu();
                     }
-                    if ui.button(format!("Rétablir  ({})", self.config.keymap.label(Action::Redo))).clicked() {
+                    if ui.button(trf!("Rétablir  ({})", "Redo  ({})", self.config.keymap.label(Action::Redo))).clicked() {
                         self.undo_redo(true);
                         ui.close_menu();
                     }
@@ -6214,8 +6325,8 @@ impl eframe::App for StudioApp {
                         ui.close_menu();
                     }
                 });
-                ui.menu_button("Affichage", |ui| {
-                    ui.checkbox(&mut self.show_grid, "Grille");
+                ui.menu_button(tr!("Affichage", "View"), |ui| {
+                    ui.checkbox(&mut self.show_grid, tr!("Grille", "Grid"));
                     ui.add_enabled_ui(self.show_grid, |ui| {
                         ui.horizontal(|ui| {
                             ui.add_space(18.0);
@@ -6227,13 +6338,13 @@ impl eframe::App for StudioApp {
                                     .suffix("°")
                                     .max_decimals(1),
                             )
-                            .on_hover_text("Tourne la grille au sol autour de l'origine (glisser ou taper un angle)");
+                            .on_hover_text(tr!("Tourne la grille au sol autour de l'origine (glisser ou taper un angle)", "Rotates the ground grid around the origin (drag or type an angle)"));
                             for (label, d) in [("⟲ 15°", 15.0), ("⟳ 15°", -15.0)] {
                                 if ui.small_button(label).clicked() {
                                     self.grid_yaw = wrap_deg(self.grid_yaw + d);
                                 }
                             }
-                            if ui.small_button("0°").on_hover_text("Remettre la grille droite").clicked() {
+                            if ui.small_button("0°").on_hover_text(tr!("Remettre la grille droite", "Straighten the grid")).clicked() {
                                 self.grid_yaw = 0.0;
                             }
                         });
@@ -6241,9 +6352,9 @@ impl eframe::App for StudioApp {
                         ui.horizontal(|ui| {
                             ui.add_space(18.0);
                             if ui
-                                .add_enabled(can_align, egui::Button::new("Aligner sur le personnage sélectionné"))
-                                .on_hover_text("La grille prend l'orientation du personnage")
-                                .on_disabled_hover_text("Sélectionnez d'abord un personnage")
+                                .add_enabled(can_align, egui::Button::new(tr!("Aligner sur le personnage sélectionné", "Align with the selected character")))
+                                .on_hover_text(tr!("La grille prend l'orientation du personnage", "The grid takes the character's orientation"))
+                                .on_disabled_hover_text(tr!("Sélectionnez d'abord un personnage", "First select a character"))
                                 .clicked()
                             {
                                 self.align_grid_to_selection();
@@ -6254,13 +6365,14 @@ impl eframe::App for StudioApp {
                             if ui
                                 .add_enabled(
                                     can_align,
-                                    egui::Button::new(format!(
+                                    egui::Button::new(trf!(
                                         "Placer sous le personnage sélectionné  ({})",
+                                        "Put under the selected character  ({})",
                                         self.config.keymap.label(Action::GridToSelection)
                                     )),
                                 )
-                                .on_hover_text("Déplace la grille aux pieds du personnage (toit, étage…), sans changer son orientation")
-                                .on_disabled_hover_text("Sélectionnez d'abord un personnage")
+                                .on_hover_text(tr!("Déplace la grille aux pieds du personnage (toit, étage…), sans changer son orientation", "Moves the grid to the character's feet (roof, upper floor…), without changing its orientation"))
+                                .on_disabled_hover_text(tr!("Sélectionnez d'abord un personnage", "First select a character"))
                                 .clicked()
                             {
                                 self.place_grid_at_selection();
@@ -6269,9 +6381,9 @@ impl eframe::App for StudioApp {
                         ui.horizontal(|ui| {
                             ui.add_space(18.0);
                             if ui
-                                .add_enabled(can_align, egui::Button::new("Poser le personnage au centre de la grille"))
-                                .on_hover_text("Amène les pieds du personnage sélectionné au centre de la grille, sans changer son orientation")
-                                .on_disabled_hover_text("Sélectionnez d'abord un personnage")
+                                .add_enabled(can_align, egui::Button::new(tr!("Poser le personnage au centre de la grille", "Put the character at the center of the grid")))
+                                .on_hover_text(tr!("Amène les pieds du personnage sélectionné au centre de la grille, sans changer son orientation", "Brings the selected character's feet to the center of the grid, without changing its orientation"))
+                                .on_disabled_hover_text(tr!("Sélectionnez d'abord un personnage", "First select a character"))
                                 .clicked()
                             {
                                 self.place_selection_on_grid();
@@ -6279,31 +6391,31 @@ impl eframe::App for StudioApp {
                         });
                         ui.horizontal(|ui| {
                             ui.add_space(18.0);
-                            ui.label("Hauteur");
+                            ui.label(tr!("Hauteur", "Height"));
                             ui.add(crate::calc::drag(&mut self.grid_origin.y).speed(0.05).suffix(" m").max_decimals(2))
-                                .on_hover_text("Hauteur de la grille (glisser ou taper une valeur)");
+                                .on_hover_text(tr!("Hauteur de la grille (glisser ou taper une valeur)", "Grid height (drag or type a value)"));
                             if ui
-                                .add_enabled(self.grid_origin != Vec3::ZERO, egui::Button::new("Origine").small())
-                                .on_hover_text("Ramener la grille à l'origine du monde (0, 0, 0)")
+                                .add_enabled(self.grid_origin != Vec3::ZERO, egui::Button::new(tr!("Origine", "Origin")).small())
+                                .on_hover_text(tr!("Ramener la grille à l'origine du monde (0, 0, 0)", "Bring the grid back to the world origin (0, 0, 0)"))
                                 .clicked()
                             {
                                 self.grid_origin = Vec3::ZERO;
                             }
                         });
                     });
-                    ui.checkbox(&mut self.show_monitor, "Moniteur de la caméra de prise");
-                    ui.checkbox(&mut self.show_skeleton, "Squelette de la sélection");
-                    ui.checkbox(&mut self.show_all_skeletons, "Squelettes de tous les acteurs");
+                    ui.checkbox(&mut self.show_monitor, tr!("Moniteur de la caméra de prise", "Shot camera monitor"));
+                    ui.checkbox(&mut self.show_skeleton, tr!("Squelette de la sélection", "Selection skeleton"));
+                    ui.checkbox(&mut self.show_all_skeletons, tr!("Squelettes de tous les acteurs", "Skeletons of all actors"));
                     ui.separator();
-                    if ui.button("⚙ Qualité graphique…").clicked() {
+                    if ui.button(tr!("⚙ Qualité graphique…", "⚙ Graphics quality…")).clicked() {
                         self.quality_open = true;
                         ui.close_menu();
                     }
-                    if ui.button("🎨 Post-traitement…").on_hover_text("Étalonnage, profondeur de champ, netteté, grain (enregistrés dans le projet)").clicked() {
+                    if ui.button(tr!("🎨 Post-traitement…", "🎨 Post-processing…")).on_hover_text(tr!("Étalonnage, profondeur de champ, netteté, grain (enregistrés dans le projet)", "Color grading, depth of field, sharpness, grain (saved in the project)")).clicked() {
                         self.post_fx_open = true;
                         ui.close_menu();
                     }
-                    if ui.button("⌨ Raccourcis clavier…").clicked() {
+                    if ui.button(tr!("⌨ Raccourcis clavier…", "⌨ Keyboard shortcuts…")).clicked() {
                         self.open_help(help_ui::HelpTab::Keys);
                         ui.close_menu();
                     }
@@ -6322,8 +6434,9 @@ impl eframe::App for StudioApp {
                     let cur = self.cur_frame();
                     if amb_animated {
                         ui.label(
-                            egui::RichText::new(format!(
+                            egui::RichText::new(trf!(
                                 "Ambiance animée, {} clé(s) : orientation, intensité et fond posent une clé à l'image {cur}",
+                                "Animated ambiance, {} key(s): orientation, intensity and background set a key at frame {cur}",
                                 self.scene.ambiance.keys.len()
                             ))
                             .small()
@@ -6344,19 +6457,19 @@ impl eframe::App for StudioApp {
                         });
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Intensité");
+                        ui.label(tr!("Intensité", "Intensity"));
                         amb_changed |= ui
                             .add(egui::Slider::new(&mut amb.intensity, 0.0..=3.0).custom_formatter(two_decimals))
-                            .on_hover_text("Lumière d'ambiance (en mode Studio : dôme et remplissage)")
+                            .on_hover_text(tr!("Lumière d'ambiance (en mode Studio : dôme et remplissage)", "Ambient light (in Studio mode: dome and fill)"))
                             .changed();
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Fond");
+                        ui.label(tr!("Fond", "Background"));
                         amb_changed |= ui
                             .color_edit_button_rgb(&mut amb.background)
-                            .on_hover_text("Couleur de fond de la vue, des photos et des vidéos (animable avec l'ambiance)")
+                            .on_hover_text(tr!("Couleur de fond de la vue, des photos et des vidéos (animable avec l'ambiance)", "Background color of the viewport, photos and videos (animatable with the ambiance)"))
                             .changed();
-                        if ui.small_button("↺").on_hover_text("Fond d'origine").clicked() {
+                        if ui.small_button("↺").on_hover_text(tr!("Fond d'origine", "Original background")).clicked() {
                             amb.background = crate::anim::DEFAULT_BACKGROUND;
                             amb_changed = true;
                         }
@@ -6371,13 +6484,13 @@ impl eframe::App for StudioApp {
                     }
                     ui.horizontal(|ui| {
                         if ui
-                            .button("🔑 Clé d'ambiance")
-                            .on_hover_text("Pose une clé à l'image courante : orientation et intensité deviennent animées")
+                            .button(tr!("🔑 Clé d'ambiance", "🔑 Ambiance key"))
+                            .on_hover_text(tr!("Pose une clé à l'image courante : orientation et intensité deviennent animées", "Sets a key on the current frame: orientation and intensity become animated"))
                             .clicked()
                         {
                             self.key_amb();
                         }
-                        if self.scene.ambiance.key_at(cur).is_some() && ui.button("✖ Supprimer la clé").clicked() {
+                        if self.scene.ambiance.key_at(cur).is_some() && ui.button(tr!("✖ Supprimer la clé", "✖ Delete key")).clicked() {
                             self.delete_amb_key(cur);
                         }
                     });
@@ -6385,11 +6498,11 @@ impl eframe::App for StudioApp {
                     let animated = !self.scene.sun.is_empty();
                     let cur = self.cur_frame();
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Soleil").strong());
+                        ui.label(egui::RichText::new(tr!("Soleil", "Sun")).strong());
                         let state = if animated {
-                            format!("animé, {} clé(s) : les réglages posent une clé à l'image {cur}", self.scene.sun.keys.len())
+                            trf!("animé, {} clé(s) : les réglages posent une clé à l'image {cur}", "animated, {} key(s): settings set a key at frame {cur}", self.scene.sun.keys.len())
                         } else {
-                            "fixe".into()
+                            tr!("fixe", "still").into()
                         };
                         ui.label(egui::RichText::new(state).small().weak());
                     });
@@ -6403,9 +6516,9 @@ impl eframe::App for StudioApp {
                     ui.horizontal_wrapped(|ui| {
                         for (i, p) in SUN_PRESETS.iter().enumerate() {
                             let hour = crate::environment::preset_sky_hour(i).filter(|_| sky_shown);
-                            let mut b = ui.button(p.0);
+                            let mut b = ui.button(crate::environment::sun_preset_label(p.0));
                             if let Some(h) = hour {
-                                b = b.on_hover_text(format!("Ciel de la carte à {h:.0} h, soleil (ou lune) du jeu"));
+                                b = b.on_hover_text(trf!("Ciel de la carte à {h:.0} h, soleil (ou lune) du jeu", "Map sky at {h:.0}:00, the game's sun (or moon)"));
                             }
                             if b.clicked() {
                                 if hour.is_some() {
@@ -6421,19 +6534,19 @@ impl eframe::App for StudioApp {
                         self.set_sky_hour(h);
                     }
                     ui.horizontal(|ui| {
-                        ui.label("Azimut");
+                        ui.label(tr!("Azimut", "Azimuth"));
                         sun_changed |= ui
                             .add(crate::calc::drag(&mut st.azimuth).range(-180.0..=180.0).speed(1.0).max_decimals(1).suffix("°"))
                             .changed();
-                        ui.label("Hauteur");
+                        ui.label(tr!("Hauteur", "Height"));
                         sun_changed |= ui
                             .add(crate::calc::drag(&mut st.elevation).range(1.0..=90.0).speed(0.5).max_decimals(1).suffix("°"))
                             .changed();
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Couleur");
+                        ui.label(tr!("Couleur", "Color"));
                         sun_changed |= ui.color_edit_button_rgb(&mut st.color).changed();
-                        ui.label("Intensité");
+                        ui.label(tr!("Intensité", "Intensity"));
                         sun_changed |= ui.add(egui::Slider::new(&mut st.intensity, 0.0..=3.0).custom_formatter(two_decimals)).changed();
                     });
                     if sun_changed {
@@ -6447,54 +6560,57 @@ impl eframe::App for StudioApp {
                     }
                     ui.horizontal(|ui| {
                         if ui
-                            .button("🔑 Clé de soleil")
-                            .on_hover_text("Pose une clé à l'image courante : le soleil devient animé")
+                            .button(tr!("🔑 Clé de soleil", "🔑 Sun key"))
+                            .on_hover_text(tr!("Pose une clé à l'image courante : le soleil devient animé", "Sets a key on the current frame: the sun becomes animated"))
                             .clicked()
                         {
                             self.key_sun();
                         }
-                        if self.scene.sun.key_at(cur).is_some() && ui.button("✖ Supprimer la clé").clicked() {
+                        if self.scene.sun.key_at(cur).is_some() && ui.button(tr!("✖ Supprimer la clé", "✖ Delete key")).clicked() {
                             self.delete_sun_key(cur);
                         }
                     });
-                    ui.checkbox(&mut self.show_sun, "Montrer le soleil dans la vue de travail");
-                    ui.checkbox(&mut self.lighting.shadows, "Ombres portées du soleil");
+                    ui.checkbox(&mut self.show_sun, tr!("Montrer le soleil dans la vue de travail", "Show the sun in the work view"));
+                    ui.checkbox(&mut self.lighting.shadows, tr!("Ombres portées du soleil", "Sun cast shadows"));
                     ui.add_enabled_ui(self.lighting.shadows, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label("Ombre au sol");
+                            ui.label(tr!("Ombre au sol", "Ground shadow"));
                             ui.add(egui::Slider::new(&mut self.lighting.ground_shadow, 0.0..=1.0));
                         });
-                        ui.checkbox(&mut self.lighting.decor_shades_actors, "Le décor ombre les personnages")
-                            .on_hover_text(
+                        ui.checkbox(&mut self.lighting.decor_shades_actors, tr!("Le décor ombre les personnages", "Scenery shades the characters"))
+                            .on_hover_text(tr!(
                                 "Décoché : les arbres et les bâtiments n'ombrent plus les personnages, qui \
                                  gardent le soleil et ses reflets même sous la canopée (le sol et le décor \
                                  restent ombrés). Éclairage de cinéma.",
-                            );
+                                "Unchecked: trees and buildings no longer shade the characters, who \
+                                 keep the sun and its highlights even under the canopy (the ground and scenery \
+                                 stay shaded). Movie lighting."
+                            ));
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Champ de vision");
+                        ui.label(tr!("Champ de vision", "Field of view"));
                         ui.add(crate::calc::drag(&mut self.cam.fov_deg).range(10.0..=120.0).suffix("°"));
                     });
                 });
-                ui.menu_button("Décor", |ui| self.decor_menu(ui));
-                ui.menu_button("Aide", |ui| {
-                    if ui.button("📖 Prise en main").clicked() {
+                ui.menu_button(tr!("Décor", "Scenery"), |ui| self.decor_menu(ui));
+                ui.menu_button(tr!("Aide", "Help"), |ui| {
+                    if ui.button(tr!("📖 Prise en main", "📖 Getting started")).clicked() {
                         self.open_help(help_ui::HelpTab::Start);
                         ui.close_menu();
                     }
-                    if ui.button("🖱 Souris et caméras").clicked() {
+                    if ui.button(tr!("🖱 Souris et caméras", "🖱 Mouse and cameras")).clicked() {
                         self.open_help(help_ui::HelpTab::Mouse);
                         ui.close_menu();
                     }
-                    if ui.button("⌨ Raccourcis clavier…").clicked() {
+                    if ui.button(tr!("⌨ Raccourcis clavier…", "⌨ Keyboard shortcuts…")).clicked() {
                         self.open_help(help_ui::HelpTab::Keys);
                         ui.close_menu();
                     }
                     if !DISCORD_URL.is_empty() {
                         ui.separator();
                         if ui
-                            .button("💬 Rejoindre le Discord")
-                            .on_hover_text("Questions, idées, partage de tes animations")
+                            .button(tr!("💬 Rejoindre le Discord", "💬 Join the Discord"))
+                            .on_hover_text(tr!("Questions, idées, partage de tes animations", "Questions, ideas, sharing your animations"))
                             .clicked()
                         {
                             ctx.open_url(egui::OpenUrl::new_tab(DISCORD_URL));
@@ -6503,14 +6619,26 @@ impl eframe::App for StudioApp {
                     }
                     self.update_menu(ui);
                 });
+                // nom écrit dans les deux langues : il se trouve quelle que soit la langue affichée
+                ui.menu_button("🌐 Langue / Language", |ui| {
+                    let cur = crate::i18n::current();
+                    for lang in crate::i18n::Lang::ALL {
+                        if ui.selectable_label(cur == lang, lang.native_name()).clicked() {
+                            crate::i18n::set(lang);
+                            self.config.lang = Some(lang);
+                            self.config.save();
+                            ui.close_menu();
+                        }
+                    }
+                });
                 ui.separator();
-                ui.label("Gizmo :");
+                ui.label(tr!("Gizmo :", "Gizmo:"));
                 let km = &self.config.keymap;
                 let (rot, tr, fr) =
                     (km.label(Action::GizmoRotate), km.label(Action::GizmoTranslate), km.label(Action::FrameSelection));
                 ui.selectable_value(&mut self.gizmo, GizmoMode::Rotate, format!("⟳ Rotation ({rot})"));
                 ui.selectable_value(&mut self.gizmo, GizmoMode::Translate, format!("✥ Translation ({tr})"));
-                if ui.button(format!("Cadrer ({fr})")).clicked() {
+                if ui.button(trf!("Cadrer ({fr})", "Frame ({fr})")).clicked() {
                     self.frame_selection();
                 }
             });

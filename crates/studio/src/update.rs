@@ -162,7 +162,7 @@ fn curl() -> Result<PathBuf> {
     let system = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
     let curl = system.join("System32").join("curl.exe");
     if !curl.is_file() {
-        bail!("curl.exe introuvable (Windows 10 version 1803 ou plus récente nécessaire)");
+        bail!(tr!("curl.exe introuvable (Windows 10 version 1803 ou plus récente nécessaire)", "curl.exe not found (Windows 10 version 1803 or later required)"));
     }
     Ok(curl)
 }
@@ -176,13 +176,13 @@ fn fetch_text(url: &str) -> Result<String> {
         .arg(url)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let out = c.output().context("lancement de curl")?;
+    let out = c.output().context(tr!("lancement de curl", "starting curl"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         if err.contains("404") {
-            bail!("aucune version publiée sur GitHub pour l'instant");
+            bail!(tr!("aucune version publiée sur GitHub pour l'instant", "no version published on GitHub yet"));
         }
-        bail!("connexion à GitHub impossible : {}", err.trim().lines().last().unwrap_or("erreur réseau"));
+        bail!("{}", trf!("connexion à GitHub impossible : {}", "could not connect to GitHub: {}", err.trim().lines().last().unwrap_or(tr!("erreur réseau", "network error"))));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
@@ -211,14 +211,14 @@ fn latest_release() -> Result<Option<Release>> {
 }
 
 fn parse_release(json: &str, current: &str) -> Result<Option<Release>> {
-    let gh: GhRelease = serde_json::from_str(json).context("réponse de GitHub illisible")?;
+    let gh: GhRelease = serde_json::from_str(json).context(tr!("réponse de GitHub illisible", "unreadable response from GitHub"))?;
     if !is_newer(&gh.tag_name, current) {
         return Ok(None);
     }
     let zip = gh.assets.iter().find(|a| a.name == ZIP_NAME);
     let sha = gh.assets.iter().find(|a| a.name == format!("{ZIP_NAME}.sha256"));
     let (Some(zip), Some(sha)) = (zip, sha) else {
-        bail!("la version {} ne contient pas {ZIP_NAME} et son fichier .sha256", gh.tag_name);
+        bail!("{}", trf!("la version {} ne contient pas {ZIP_NAME} et son fichier .sha256", "version {} does not contain {ZIP_NAME} and its .sha256 file", gh.tag_name));
     };
     Ok(Some(Release {
         version: gh.tag_name.trim_start_matches(['v', 'V']).to_string(),
@@ -233,7 +233,7 @@ fn parse_release(json: &str, current: &str) -> Result<Option<Release>> {
 // ------------------------------------------------------------------ installation
 
 fn update_dir() -> Result<PathBuf> {
-    let base = std::env::var_os("LOCALAPPDATA").context("dossier LOCALAPPDATA introuvable")?;
+    let base = std::env::var_os("LOCALAPPDATA").context(tr!("dossier LOCALAPPDATA introuvable", "LOCALAPPDATA folder not found"))?;
     Ok(PathBuf::from(base).join("PlanetStudio").join("update"))
 }
 
@@ -250,9 +250,9 @@ fn cleanup_old() {
 }
 
 fn download_and_install(rel: &Release, progress: &DownloadProgress) -> Result<()> {
-    let exe = std::env::current_exe().context("emplacement de PlanetStudio introuvable")?;
+    let exe = std::env::current_exe().context(tr!("emplacement de PlanetStudio introuvable", "PlanetStudio location not found"))?;
     let dir = update_dir()?;
-    std::fs::create_dir_all(&dir).with_context(|| format!("création de {}", dir.display()))?;
+    std::fs::create_dir_all(&dir).with_context(|| trf!("création de {}", "creating {}", dir.display()))?;
     let archive = dir.join(format!("{ZIP_NAME}.part"));
     struct Remove(PathBuf);
     impl Drop for Remove {
@@ -266,7 +266,7 @@ fn download_and_install(rel: &Release, progress: &DownloadProgress) -> Result<()
     let expected = fetch_text(&rel.sha_url)?;
     let expected = expected.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
     if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
-        bail!("fichier .sha256 de la version {} invalide", rel.version);
+        bail!("{}", trf!("fichier .sha256 de la version {} invalide", "invalid .sha256 file for version {}", rel.version));
     }
     let mut c = ffmpeg::command(&curl()?);
     c.args(["--location", "--fail", "--silent", "--show-error", "--retry", "2", "--output"])
@@ -274,7 +274,7 @@ fn download_and_install(rel: &Release, progress: &DownloadProgress) -> Result<()
         .args(["--header", "User-Agent: PlanetStudio-updater"])
         .arg(&rel.zip_url);
     c.stderr(Stdio::piped());
-    let mut child = c.spawn().context("lancement de curl")?;
+    let mut child = c.spawn().context(tr!("lancement de curl", "starting curl"))?;
     let mut stderr = child.stderr.take().unwrap();
     let errors = std::thread::spawn(move || {
         let mut s = String::new();
@@ -288,14 +288,14 @@ fn download_and_install(rel: &Release, progress: &DownloadProgress) -> Result<()
         if progress.cancel.load(Ordering::Relaxed) {
             let _ = child.kill();
             let _ = child.wait();
-            bail!("mise à jour annulée");
+            bail!(tr!("mise à jour annulée", "update cancelled"));
         }
         progress.bytes.store(std::fs::metadata(&archive).map(|m| m.len()).unwrap_or(0), Ordering::Relaxed);
         std::thread::sleep(std::time::Duration::from_millis(150));
     };
     let log = errors.join().unwrap_or_default();
     if !status.success() {
-        bail!("téléchargement impossible : {}", log.trim().lines().last().unwrap_or("erreur réseau"));
+        bail!("{}", trf!("téléchargement impossible : {}", "download failed: {}", log.trim().lines().last().unwrap_or(tr!("erreur réseau", "network error"))));
     }
 
     // 2) vérification : taille annoncée par GitHub, puis empreinte SHA-256
@@ -303,10 +303,10 @@ fn download_and_install(rel: &Release, progress: &DownloadProgress) -> Result<()
     let size = std::fs::metadata(&archive)?.len();
     progress.bytes.store(size, Ordering::Relaxed);
     if size != rel.zip_size {
-        bail!("fichier reçu inattendu ({size} octets au lieu de {})", rel.zip_size);
+        bail!("{}", trf!("fichier reçu inattendu ({size} octets au lieu de {})", "unexpected file received ({size} bytes instead of {})", rel.zip_size));
     }
     if ffmpeg::sha256_file(&archive)? != expected {
-        bail!("empreinte SHA-256 incorrecte : fichier refusé");
+        bail!(tr!("empreinte SHA-256 incorrecte : fichier refusé", "wrong SHA-256 checksum: file rejected"));
     }
 
     // 3) extraction de l'exécutable à côté de l'actuel, puis échange des deux fichiers
@@ -317,19 +317,19 @@ fn download_and_install(rel: &Release, progress: &DownloadProgress) -> Result<()
 }
 
 fn extract_exe(archive: &Path, target: &Path) -> Result<()> {
-    let mut zip = zip::ZipArchive::new(std::fs::File::open(archive)?).context("archive illisible")?;
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(archive)?).context(tr!("archive illisible", "unreadable archive"))?;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)?;
         let name = entry.name().replace('\\', "/");
         if name.rsplit('/').next().is_some_and(|n| n.eq_ignore_ascii_case(EXE_NAME)) {
             let mut out = std::fs::File::create(target).with_context(|| {
-                format!("écriture impossible dans {} (dossier protégé ?)", target.parent().unwrap_or(target).display())
+                trf!("écriture impossible dans {} (dossier protégé ?)", "cannot write to {} (protected folder?)", target.parent().unwrap_or(target).display())
             })?;
             std::io::copy(&mut entry, &mut out)?;
             return Ok(());
         }
     }
-    bail!("{EXE_NAME} absent de l'archive")
+    bail!("{}", trf!("{EXE_NAME} absent de l'archive", "{EXE_NAME} missing from the archive"))
 }
 
 /// Windows permet de renommer un .exe en cours d'exécution (pas de le supprimer) : l'actuel
@@ -339,13 +339,13 @@ fn swap_exe(exe: &Path, new_exe: &Path) -> Result<()> {
     let _ = std::fs::remove_file(&old);
     if let Err(e) = std::fs::rename(exe, &old) {
         let _ = std::fs::remove_file(new_exe);
-        return Err(e).context("remplacement de l'exécutable impossible");
+        return Err(e).context(tr!("remplacement de l'exécutable impossible", "could not replace the executable"));
     }
     if let Err(e) = std::fs::rename(new_exe, exe) {
         // remet l'ancienne version en place
         let _ = std::fs::rename(&old, exe);
         let _ = std::fs::remove_file(new_exe);
-        return Err(e).context("remplacement de l'exécutable impossible");
+        return Err(e).context(tr!("remplacement de l'exécutable impossible", "could not replace the executable"));
     }
     Ok(())
 }

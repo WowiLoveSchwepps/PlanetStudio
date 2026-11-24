@@ -35,7 +35,7 @@ impl ImageFormat {
             ImageFormat::Png => "PNG",
             ImageFormat::Jpeg => "JPEG",
             ImageFormat::Tiff => "TIFF",
-            ImageFormat::Webp => "WebP (sans perte)",
+            ImageFormat::Webp => tr!("WebP (sans perte)", "WebP (lossless)"),
             ImageFormat::Bmp => "BMP",
             ImageFormat::Tga => "TGA (Targa)",
         }
@@ -52,12 +52,12 @@ impl ImageFormat {
     }
     pub fn hint(self) -> &'static str {
         match self {
-            ImageFormat::Png => "Sans perte, compressé : le choix sûr pour le web et la retouche.",
-            ImageFormat::Jpeg => "Avec perte, fichiers légers : partage, réseaux sociaux.",
-            ImageFormat::Tiff => "Sans perte, non compressé : impression, Photoshop, montage.",
-            ImageFormat::Webp => "Sans perte, plus léger que le PNG : web.",
-            ImageFormat::Bmp => "Sans perte, non compressé : compatibilité Windows ancienne.",
-            ImageFormat::Tga => "Sans perte : séquences pour les logiciels de compositing et de jeu.",
+            ImageFormat::Png => tr!("Sans perte, compressé : le choix sûr pour le web et la retouche.", "Lossless, compressed: the safe choice for the web and editing."),
+            ImageFormat::Jpeg => tr!("Avec perte, fichiers légers : partage, réseaux sociaux.", "Lossy, small files: sharing, social media."),
+            ImageFormat::Tiff => tr!("Sans perte, non compressé : impression, Photoshop, montage.", "Lossless, uncompressed: printing, Photoshop, editing."),
+            ImageFormat::Webp => tr!("Sans perte, plus léger que le PNG : web.", "Lossless, smaller than PNG: web."),
+            ImageFormat::Bmp => tr!("Sans perte, non compressé : compatibilité Windows ancienne.", "Lossless, uncompressed: old Windows compatibility."),
+            ImageFormat::Tga => tr!("Sans perte : séquences pour les logiciels de compositing et de jeu.", "Lossless: sequences for compositing and game software."),
         }
     }
     pub fn has_quality(self) -> bool {
@@ -71,7 +71,7 @@ pub fn write_image(path: &Path, w: u32, h: u32, rgba: &[u8], format: ImageFormat
     if format == ImageFormat::Png {
         return crate::app::write_png(path, w, h, rgba);
     }
-    let file = std::fs::File::create(path).with_context(|| format!("création de {}", path.display()))?;
+    let file = std::fs::File::create(path).with_context(|| trf!("création de {}", "creating {}", path.display()))?;
     let mut out = BufWriter::new(file);
     // l'alpha du rendu n'a pas de sens (fond toujours opaque) : RVB
     let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
@@ -105,16 +105,16 @@ impl VideoFormat {
         match self {
             VideoFormat::H264 => "H.264 (MP4)",
             VideoFormat::Av1 => "AV1 (MP4)",
-            VideoFormat::Gif => "GIF animé",
-            VideoFormat::Sequence => "Séquence d'images",
+            VideoFormat::Gif => tr!("GIF animé", "Animated GIF"),
+            VideoFormat::Sequence => tr!("Séquence d'images", "Image sequence"),
         }
     }
     pub fn hint(self) -> &'static str {
         match self {
-            VideoFormat::H264 => "Le plus compatible : tous les lecteurs, téléphones, réseaux sociaux, logiciels de montage. Jusqu'à 4K.",
-            VideoFormat::Av1 => "Fichiers plus légers à qualité égale, jusqu'à 8K. Lu par Windows 11, VLC, les navigateurs, Premiere et Kdenlive ; encodage plus lent.",
-            VideoFormat::Gif => "Animation sans son, 256 couleurs par image : courtes boucles pour le web et les messageries. Préférez une petite taille.",
-            VideoFormat::Sequence => "Une image par fichier, sans perte : pour le compositing ou un montage en dehors du studio.",
+            VideoFormat::H264 => tr!("Le plus compatible : tous les lecteurs, téléphones, réseaux sociaux, logiciels de montage. Jusqu'à 4K.", "The most compatible: every player, phone, social network and editing software. Up to 4K."),
+            VideoFormat::Av1 => tr!("Fichiers plus légers à qualité égale, jusqu'à 8K. Lu par Windows 11, VLC, les navigateurs, Premiere et Kdenlive ; encodage plus lent.", "Smaller files at equal quality, up to 8K. Plays in Windows 11, VLC, browsers, Premiere and Kdenlive; slower to encode."),
+            VideoFormat::Gif => tr!("Animation sans son, 256 couleurs par image : courtes boucles pour le web et les messageries. Préférez une petite taille.", "Silent animation, 256 colors per frame: short loops for the web and chat apps. Prefer a small size."),
+            VideoFormat::Sequence => tr!("Une image par fichier, sans perte : pour le compositing ou un montage en dehors du studio.", "One image per file, lossless: for compositing or editing outside the studio."),
         }
     }
     pub fn codec(self) -> Option<Codec> {
@@ -178,18 +178,18 @@ impl Exporter {
 
     /// Envoie une image RGBA. Renvoie l'image si la file est pleine (à réessayer plus tard).
     pub fn try_push(&self, rgba: Vec<u8>) -> Result<Option<Vec<u8>>> {
-        let tx = self.tx.as_ref().ok_or_else(|| anyhow!("export fermé"))?;
+        let tx = self.tx.as_ref().ok_or_else(|| anyhow!(tr!("export fermé", "export closed")))?;
         match tx.try_send(rgba) {
             Ok(()) => Ok(None),
             Err(TrySendError::Full(img)) => Ok(Some(img)),
-            Err(TrySendError::Disconnected(_)) => bail!("l'export s'est arrêté"),
+            Err(TrySendError::Disconnected(_)) => bail!(tr!("l'export s'est arrêté", "the export stopped")),
         }
     }
 
     /// Envoie une image en attendant une place dans la file.
     pub fn push_blocking(&self, rgba: Vec<u8>) -> Result<()> {
-        let tx = self.tx.as_ref().ok_or_else(|| anyhow!("export fermé"))?;
-        tx.send(rgba).map_err(|_| anyhow!("l'export s'est arrêté"))
+        let tx = self.tx.as_ref().ok_or_else(|| anyhow!(tr!("export fermé", "export closed")))?;
+        tx.send(rgba).map_err(|_| anyhow!(tr!("l'export s'est arrêté", "the export stopped")))
     }
 
     /// Ferme l'entrée : le fil termine puis écrit le fichier.
@@ -205,8 +205,8 @@ impl Exporter {
     pub fn finish(mut self) -> Result<PathBuf> {
         self.tx = None;
         match self.handle.take() {
-            Some(h) => h.join().map_err(|_| anyhow!("le fil d'export a planté"))?,
-            None => bail!("export déjà terminé"),
+            Some(h) => h.join().map_err(|_| anyhow!(tr!("le fil d'export a planté", "the export thread crashed")))?,
+            None => bail!(tr!("export déjà terminé", "export already finished")),
         }
     }
 }
@@ -263,7 +263,7 @@ fn run(job: Job, rx: Receiver<Vec<u8>>, progress: &Progress) -> Result<PathBuf> 
             Ok(path)
         }
         Job::Gif { path, width, height, rate, repeat } => {
-            let file = std::fs::File::create(&path).with_context(|| format!("création de {}", path.display()))?;
+            let file = std::fs::File::create(&path).with_context(|| trf!("création de {}", "creating {}", path.display()))?;
             let mut enc = gif::Encoder::new(BufWriter::new(file), width as u16, height as u16, &[])?;
             enc.set_repeat(if repeat { gif::Repeat::Infinite } else { gif::Repeat::Finite(0) })?;
             // délais en centièmes de seconde, arrondis sans dérive (24 i/s : 4, 4, 5, 4, 4, 5...)
@@ -277,7 +277,7 @@ fn run(job: Job, rx: Receiver<Vec<u8>>, progress: &Progress) -> Result<PathBuf> 
                 progress.done.fetch_add(1, Ordering::Relaxed);
             }
             if k == 0 {
-                bail!("aucune image");
+                bail!(tr!("aucune image", "no frame"));
             }
             drop(enc);
             Ok(path)
@@ -348,18 +348,18 @@ impl Staged {
     fn receive(path: &Path, p: &VideoParams, rx: Receiver<Vec<u8>>, progress: &Progress) -> Result<Self> {
         let staged = Staged { tmp: path.with_extension("2passes.tmp"), w: p.width, h: p.height };
         progress.stage.store(1, Ordering::Relaxed);
-        let file = std::fs::File::create(&staged.tmp).with_context(|| format!("création de {}", staged.tmp.display()))?;
+        let file = std::fs::File::create(&staged.tmp).with_context(|| trf!("création de {}", "creating {}", staged.tmp.display()))?;
         let mut out = BufWriter::with_capacity(1 << 22, file);
         let mut n = 0usize;
         for rgba in rx.iter() {
-            video::rgba_to_yuv(&rgba, staged.w, staged.h).write_to(&mut out).context("fichier temporaire des 2 passes")?;
+            video::rgba_to_yuv(&rgba, staged.w, staged.h).write_to(&mut out).context(tr!("fichier temporaire des 2 passes", "2-pass temporary file"))?;
             n += 1;
             progress.done.fetch_add(1, Ordering::Relaxed);
         }
         out.flush()?;
         drop(out);
         if n == 0 {
-            bail!("aucune image");
+            bail!(tr!("aucune image", "no frame"));
         }
         Ok(staged)
     }
@@ -389,7 +389,7 @@ pub fn free_path(dir: &Path, base: &str, ext: &str, overwrite: bool) -> Result<P
     (1..100_000)
         .map(|i| dir.join(format!("{base}_{i:03}.{ext}")))
         .find(|p| !p.exists())
-        .ok_or_else(|| anyhow!("trop de fichiers « {base} » dans {}", dir.display()))
+        .ok_or_else(|| anyhow!("{}", trf!("trop de fichiers « {base} » dans {}", "too many “{base}” files in {}", dir.display())))
 }
 
 /// Nom de fichier sans caractères interdits par Windows ni extension.

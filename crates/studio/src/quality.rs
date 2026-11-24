@@ -21,10 +21,10 @@ impl ShadowQuality {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Off => "Désactivées",
-            Self::Low => "Basse (1024, bords nets)",
-            Self::Medium => "Moyenne (2048, 3×3)",
-            Self::High => "Haute (4096, 3×3)",
+            Self::Off => tr!("Désactivées", "Off"),
+            Self::Low => tr!("Basse (1024, bords nets)", "Low (1024, hard edges)"),
+            Self::Medium => tr!("Moyenne (2048, 3×3)", "Medium (2048, 3×3)"),
+            Self::High => tr!("Haute (4096, 3×3)", "High (4096, 3×3)"),
             Self::Ultra => "Ultra (4096, 5×5)",
         }
     }
@@ -54,10 +54,10 @@ impl TextureQuality {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Low => "Basse (1/8)",
-            Self::Medium => "Moyenne (1/4)",
-            Self::High => "Haute (1/2)",
-            Self::Ultra => "Ultra (pleine résolution)",
+            Self::Low => tr!("Basse (1/8)", "Low (1/8)"),
+            Self::Medium => tr!("Moyenne (1/4)", "Medium (1/4)"),
+            Self::High => tr!("Haute (1/2)", "High (1/2)"),
+            Self::Ultra => tr!("Ultra (pleine résolution)", "Ultra (full resolution)"),
         }
     }
 
@@ -86,9 +86,9 @@ impl TerrainQuality {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Low => "Basse (détail jusqu'à 60 m)",
-            Self::Medium => "Moyenne (110 m)",
-            Self::High => "Haute (200 m)",
+            Self::Low => tr!("Basse (détail jusqu'à 60 m)", "Low (detail up to 60 m)"),
+            Self::Medium => tr!("Moyenne (110 m)", "Medium (110 m)"),
+            Self::High => tr!("Haute (200 m)", "High (200 m)"),
             Self::Ultra => "Ultra (350 m)",
         }
     }
@@ -118,10 +118,10 @@ impl ParticleQuality {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Low => "Basse (×0,5)",
-            Self::Medium => "Moyenne (×0,75)",
-            Self::High => "Haute (×1)",
-            Self::Ultra => "Ultra (×1,5)",
+            Self::Low => tr!("Basse (×0,5)", "Low (×0.5)"),
+            Self::Medium => tr!("Moyenne (×0,75)", "Medium (×0.75)"),
+            Self::High => tr!("Haute (×1)", "High (×1)"),
+            Self::Ultra => tr!("Ultra (×1,5)", "Ultra (×1.5)"),
         }
     }
 
@@ -148,9 +148,9 @@ impl Preset {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Preview => "Aperçu",
-            Self::Balanced => "Équilibré",
-            Self::Final => "Rendu final",
+            Self::Preview => tr!("Aperçu", "Preview"),
+            Self::Balanced => tr!("Équilibré", "Balanced"),
+            Self::Final => tr!("Rendu final", "Final render"),
         }
     }
 
@@ -341,6 +341,6 @@ mod tests {
         let old: Quality = serde_json::from_str(r#"{"msaa":4,"shadows":"Ultra","ao":1.0}"#).unwrap();
         assert!(old.flora_hq && old.water_hq && old.specular_aa && !old.fxaa);
         assert_eq!(old.terrain, TerrainQuality::High);
-        assert_eq!(Preset::from_key("Aperçu"), Some(Preset::Preview));
+        assert_eq!(Preset::from_key(tr!("Aperçu", "Preview")), Some(Preset::Preview));
     }
 }

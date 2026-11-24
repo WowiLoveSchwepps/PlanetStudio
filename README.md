@@ -1,5 +1,7 @@
 # PlanetStudio
 
+*[English version](README.en.md)*
+
 Studio d'animation en Rust pur, dans l'esprit de Source Filmmaker, qui utilise directement les modèles
 de PlanetSide 2 (moteur Forgelight). Il n'y a rien à extraire à la main : le logiciel lit les archives
 `.pack2` du jeu.
@@ -17,6 +19,9 @@ Au premier lancement, PlanetStudio demande le dossier de la version 2019 de Plan
 `%APPDATA%/PlanetStudio/config.json` et se change dans **Fichier > Changer de dossier de jeu…**.
 PlanetStudio indexe ensuite les noms de fichiers une seule fois (environ 77 000 noms), puis les garde
 en cache dans `%APPDATA%/PlanetStudio/namelist.txt`.
+
+L'interface existe en français et en anglais. Au premier lancement, elle suit la langue de Windows ;
+elle se change dans le menu **🌐 Langue / Language** (choix retenu dans `config.json`).
 
 ## Installer PlanetSide 2 (version 2019)
 

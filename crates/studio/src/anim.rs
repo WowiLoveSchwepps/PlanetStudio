@@ -18,9 +18,9 @@ impl Interp {
     pub const ALL: [Interp; 3] = [Interp::Smooth, Interp::Linear, Interp::Step];
     pub fn label(self) -> &'static str {
         match self {
-            Interp::Smooth => "Lissée",
-            Interp::Linear => "Linéaire",
-            Interp::Step => "Palier",
+            Interp::Smooth => tr!("Lissée", "Smooth"),
+            Interp::Linear => tr!("Linéaire", "Linear"),
+            Interp::Step => tr!("Palier", "Step"),
         }
     }
     fn weight(self, t: f32) -> f32 {

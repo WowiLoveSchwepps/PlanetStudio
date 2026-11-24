@@ -56,8 +56,8 @@ impl Camo {
 
     pub fn label(&self) -> String {
         match &self.choice {
-            TextureChoice::None => "Aucun (couleurs d'origine)".into(),
-            TextureChoice::Default => "Par défaut de l'armure".into(),
+            TextureChoice::None => tr!("Aucun (couleurs d'origine)", "None (original colors)").into(),
+            TextureChoice::Default => tr!("Par défaut de l'armure", "Armor default").into(),
             TextureChoice::Texture(t) => display_name(t),
         }
     }

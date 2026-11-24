@@ -48,12 +48,12 @@ impl Backend {
 
     pub fn label(self, codec: Codec) -> &'static str {
         match (self, codec) {
-            (Backend::Builtin, Codec::H264) => "Intégré · OpenH264 (processeur)",
-            (Backend::Builtin, Codec::Av1) => "Intégré · rav1e (processeur)",
-            (Backend::Cpu, Codec::H264) => "ffmpeg · x264 (processeur)",
-            (Backend::Cpu, Codec::Av1) => "ffmpeg · SVT-AV1 (processeur)",
-            (Backend::Nvenc, _) => "ffmpeg · NVENC (carte NVIDIA)",
-            (Backend::Amf, _) => "ffmpeg · AMF (carte AMD)",
+            (Backend::Builtin, Codec::H264) => tr!("Intégré · OpenH264 (processeur)", "Built-in · OpenH264 (CPU)"),
+            (Backend::Builtin, Codec::Av1) => tr!("Intégré · rav1e (processeur)", "Built-in · rav1e (CPU)"),
+            (Backend::Cpu, Codec::H264) => tr!("ffmpeg · x264 (processeur)", "ffmpeg · x264 (CPU)"),
+            (Backend::Cpu, Codec::Av1) => tr!("ffmpeg · SVT-AV1 (processeur)", "ffmpeg · SVT-AV1 (CPU)"),
+            (Backend::Nvenc, _) => tr!("ffmpeg · NVENC (carte NVIDIA)", "ffmpeg · NVENC (NVIDIA GPU)"),
+            (Backend::Amf, _) => tr!("ffmpeg · AMF (carte AMD)", "ffmpeg · AMF (AMD GPU)"),
             (Backend::Qsv, _) => "ffmpeg · Quick Sync (Intel)",
         }
     }
@@ -73,12 +73,14 @@ impl Backend {
 
     pub fn hint(self) -> &'static str {
         match self {
-            Backend::Builtin => "Toujours disponible, sans rien installer ; le plus lent.",
-            Backend::Cpu => "Meilleure compression à débit égal, plus rapide que l'encodeur intégré.",
-            Backend::Nvenc | Backend::Amf | Backend::Qsv => {
+            Backend::Builtin => tr!("Toujours disponible, sans rien installer ; le plus lent.", "Always available, nothing to install; the slowest."),
+            Backend::Cpu => tr!("Meilleure compression à débit égal, plus rapide que l'encodeur intégré.", "Better compression at equal bitrate, faster than the built-in encoder."),
+            Backend::Nvenc | Backend::Amf | Backend::Qsv => tr!(
                 "Encodage par la carte graphique : de loin le plus rapide, compression un peu moins \
-                 efficace que sur le processeur (montez légèrement le débit)."
-            }
+                 efficace que sur le processeur (montez légèrement le débit).",
+                "Encoding on the graphics card: by far the fastest, compression a little less \
+                 efficient than on the CPU (raise the bitrate slightly)."
+            ),
         }
     }
 
@@ -333,7 +335,7 @@ pub fn encode(
         _ => c.args(["-movflags", "+faststart"]).arg(out),
     };
     c.stdin(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = c.spawn().with_context(|| format!("lancement de ffmpeg ({})", exe.display()))?;
+    let mut child = c.spawn().with_context(|| trf!("lancement de ffmpeg ({})", "starting ffmpeg ({})", exe.display()))?;
     // la sortie d'erreur est lue à part : pleine, elle bloquerait ffmpeg
     let mut stderr = child.stderr.take().unwrap();
     let errors = std::thread::spawn(move || {
@@ -366,10 +368,10 @@ pub fn encode(
     if !status.success() {
         let msg: Vec<&str> = log.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("Svt[")).collect();
         let tail = msg[msg.len().saturating_sub(3)..].join(" / ");
-        bail!("ffmpeg ({name}) a échoué : {}", if tail.is_empty() { format!("code {status}") } else { tail });
+        bail!("{}", trf!("ffmpeg ({name}) a échoué : {}", "ffmpeg ({name}) failed: {}", if tail.is_empty() { format!("code {status}") } else { tail }));
     }
     if sent == 0 {
-        bail!("aucune image");
+        bail!(tr!("aucune image", "no frame"));
     }
     Ok(())
 }
@@ -410,11 +412,11 @@ pub struct DownloadProgress {
 /// [`install_dir`]. Le transfert passe par le `curl.exe` de Windows (Windows 10 1803 et
 /// suivants). Renvoie le chemin de `ffmpeg.exe`.
 pub fn download(progress: &DownloadProgress) -> Result<PathBuf> {
-    download_package(&PACKAGE, &install_dir().context("dossier LOCALAPPDATA introuvable")?, progress)
+    download_package(&PACKAGE, &install_dir().context(tr!("dossier LOCALAPPDATA introuvable", "LOCALAPPDATA folder not found"))?, progress)
 }
 
 fn download_package(pkg: &Package, dir: &Path, progress: &DownloadProgress) -> Result<PathBuf> {
-    std::fs::create_dir_all(dir).with_context(|| format!("création de {}", dir.display()))?;
+    std::fs::create_dir_all(dir).with_context(|| trf!("création de {}", "creating {}", dir.display()))?;
     let archive = dir.join("ffmpeg.zip.part");
     struct Remove(PathBuf);
     impl Drop for Remove {
@@ -428,12 +430,12 @@ fn download_package(pkg: &Package, dir: &Path, progress: &DownloadProgress) -> R
     let system = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
     let curl = system.join("System32").join("curl.exe");
     if !curl.is_file() {
-        bail!("curl.exe introuvable (Windows 10 version 1803 ou plus récente nécessaire)");
+        bail!(tr!("curl.exe introuvable (Windows 10 version 1803 ou plus récente nécessaire)", "curl.exe not found (Windows 10 version 1803 or later required)"));
     }
     let mut c = command(&curl);
     c.args(["--location", "--fail", "--silent", "--show-error", "--retry", "2", "--output"]).arg(&archive).arg(pkg.url);
     c.stderr(Stdio::piped());
-    let mut child = c.spawn().context("lancement de curl")?;
+    let mut child = c.spawn().context(tr!("lancement de curl", "starting curl"))?;
     let mut stderr = child.stderr.take().unwrap();
     let errors = std::thread::spawn(move || {
         let mut s = String::new();
@@ -447,7 +449,7 @@ fn download_package(pkg: &Package, dir: &Path, progress: &DownloadProgress) -> R
         if progress.cancel.load(Ordering::Relaxed) {
             let _ = child.kill();
             let _ = child.wait();
-            bail!("téléchargement annulé");
+            bail!(tr!("téléchargement annulé", "download cancelled"));
         }
         let got = std::fs::metadata(&archive).map(|m| m.len()).unwrap_or(0);
         progress.bytes.store(got, Ordering::Relaxed);
@@ -455,7 +457,7 @@ fn download_package(pkg: &Package, dir: &Path, progress: &DownloadProgress) -> R
     };
     let log = errors.join().unwrap_or_default();
     if !status.success() {
-        bail!("téléchargement impossible : {}", log.trim().lines().last().unwrap_or("erreur réseau"));
+        bail!("{}", trf!("téléchargement impossible : {}", "download failed: {}", log.trim().lines().last().unwrap_or(tr!("erreur réseau", "network error"))));
     }
 
     // 2) vérification : taille puis empreinte SHA-256
@@ -463,16 +465,16 @@ fn download_package(pkg: &Package, dir: &Path, progress: &DownloadProgress) -> R
     let size = std::fs::metadata(&archive)?.len();
     progress.bytes.store(size, Ordering::Relaxed);
     if size != pkg.size {
-        bail!("fichier reçu inattendu ({size} octets au lieu de {})", pkg.size);
+        bail!("{}", trf!("fichier reçu inattendu ({size} octets au lieu de {})", "unexpected file received ({size} bytes instead of {})", pkg.size));
     }
     let hash = sha256_file(&archive)?;
     if !hash.eq_ignore_ascii_case(pkg.sha256) {
-        bail!("empreinte SHA-256 incorrecte : fichier refusé");
+        bail!(tr!("empreinte SHA-256 incorrecte : fichier refusé", "wrong SHA-256 checksum: file rejected"));
     }
 
     // 3) extraction de ffmpeg.exe et de sa licence seulement
     progress.stage.store(2, Ordering::Relaxed);
-    let mut zip = zip::ZipArchive::new(std::fs::File::open(&archive)?).context("archive illisible")?;
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(&archive)?).context(tr!("archive illisible", "unreadable archive"))?;
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin)?;
     let exe = bin.join("ffmpeg.exe");
@@ -489,13 +491,13 @@ fn download_package(pkg: &Package, dir: &Path, progress: &DownloadProgress) -> R
             continue;
         };
         let tmp = target.with_extension("tmp");
-        let mut out = std::fs::File::create(&tmp).with_context(|| format!("écriture de {}", tmp.display()))?;
+        let mut out = std::fs::File::create(&tmp).with_context(|| trf!("écriture de {}", "writing {}", tmp.display()))?;
         std::io::copy(&mut entry, &mut out)?;
         drop(out);
-        std::fs::rename(&tmp, &target).with_context(|| format!("écriture de {}", target.display()))?;
+        std::fs::rename(&tmp, &target).with_context(|| trf!("écriture de {}", "writing {}", target.display()))?;
     }
     if !found {
-        bail!("ffmpeg.exe absent de l'archive");
+        bail!(tr!("ffmpeg.exe absent de l'archive", "ffmpeg.exe missing from the archive"));
     }
     Ok(exe)
 }

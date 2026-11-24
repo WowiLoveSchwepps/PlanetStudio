@@ -74,8 +74,8 @@ impl StudioApp {
         self.config.save();
         let name = b.label(action.is_fly());
         self.status = match stolen {
-            Some(o) => format!("{} : {name} (retirée de « {} »)", action.label(), o.label()),
-            None => format!("{} : {name}", action.label()),
+            Some(o) => trf!("{} : {name} (retirée de « {} »)", "{}: {name} (removed from “{}”)", action.label(), o.label()),
+            None => trf!("{} : {name}", "{}: {name}", action.label()),
         };
     }
 
@@ -84,7 +84,7 @@ impl StudioApp {
             return;
         }
         let mut open = true;
-        egui::Window::new("Aide")
+        egui::Window::new(tr!("Aide", "Help")).id(egui::Id::new("help_window"))
             .open(&mut open)
             .default_size([660.0, 580.0])
             .min_width(500.0)
@@ -93,9 +93,9 @@ impl StudioApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     for (tab, name) in [
-                        (HelpTab::Start, "📖 Prise en main"),
-                        (HelpTab::Mouse, "🖱 Souris et caméras"),
-                        (HelpTab::Keys, "⌨ Raccourcis"),
+                        (HelpTab::Start, tr!("📖 Prise en main", "📖 Getting started")),
+                        (HelpTab::Mouse, tr!("🖱 Souris et caméras", "🖱 Mouse and cameras")),
+                        (HelpTab::Keys, tr!("⌨ Raccourcis", "⌨ Shortcuts")),
                     ] {
                         let r = ui.selectable_label(self.help.tab == tab, RichText::new(name).size(15.0));
                         if r.clicked() && self.help.tab != tab {
@@ -123,13 +123,18 @@ impl StudioApp {
 
     fn keys_tab(&mut self, ui: &mut egui::Ui) {
         let km = &self.config.keymap;
-        rich(ui, km, "Cliquez sur une touche, puis appuyez sur la nouvelle. [Échap] annule, un [Clic droit] l'efface.");
+        rich(ui, km, tr!(
+            "Cliquez sur une touche, puis appuyez sur la nouvelle. [Échap] annule, un [Clic droit] l'efface.",
+            "Click a key, then press the new one. [Esc] cancels, a [Right click] clears it."
+        ));
         ui.add_space(2.0);
         ui.label(
-            RichText::new(
+            RichText::new(tr!(
                 "Les touches de déplacement sont lues par leur position : elles restent sous les mêmes \
                  doigts en AZERTY et en QWERTY. Les réglages sont enregistrés tout de suite.",
-            )
+                "Movement keys are read by their position: they stay under the same fingers on AZERTY \
+                 and QWERTY keyboards. Settings are saved right away."
+            ))
             .weak(),
         );
 
@@ -148,7 +153,7 @@ impl StudioApp {
                         let km = &mut self.config.keymap;
                         let r = ui
                             .add_enabled(!km.is_default(a), egui::Button::new("↺").small())
-                            .on_hover_text("Rétablir la touche par défaut");
+                            .on_hover_text(tr!("Rétablir la touche par défaut", "Restore the default key"));
                         if r.clicked() {
                             km.reset(a);
                             self.config.save();
@@ -163,11 +168,11 @@ impl StudioApp {
         ui.separator();
         ui.horizontal(|ui| {
             let is_default = self.config.keymap == Keymap::default();
-            if ui.add_enabled(!is_default, egui::Button::new("↺ Tout rétablir par défaut")).clicked() {
+            if ui.add_enabled(!is_default, egui::Button::new(tr!("↺ Tout rétablir par défaut", "↺ Restore all defaults"))).clicked() {
                 self.config.keymap = Keymap::default();
                 self.config.save();
                 self.help.capture = None;
-                self.status = "Raccourcis par défaut rétablis".into();
+                self.status = tr!("Raccourcis par défaut rétablis", "Default shortcuts restored").into();
             }
         });
     }
@@ -177,7 +182,7 @@ impl StudioApp {
         let km = &self.config.keymap;
         let clash = km.clash(a, slot);
         let text = if capturing {
-            RichText::new("Appuyez sur une touche…").italics()
+            RichText::new(tr!("Appuyez sur une touche…", "Press a key…")).italics()
         } else {
             match km.slot_label(a, slot) {
                 Some(t) if clash.is_some() => RichText::new(format!("⚠ {t}")).monospace().color(ui.visuals().warn_fg_color),
@@ -187,8 +192,8 @@ impl StudioApp {
         };
         let r = ui.add(egui::Button::new(text).selected(capturing).min_size(egui::vec2(150.0, 0.0)));
         let r = match clash {
-            Some(o) => r.on_hover_text(format!("Cette touche sert aussi à « {} »", o.label())),
-            None => r.on_hover_text("Clic : changer   ·   Clic droit : effacer"),
+            Some(o) => r.on_hover_text(trf!("Cette touche sert aussi à « {} »", "This key is also used for “{}”", o.label())),
+            None => r.on_hover_text(tr!("Clic : changer   ·   Clic droit : effacer", "Click: change   ·   Right click: clear")),
         };
         if r.clicked() {
             self.help.capture = if capturing { None } else { Some((a, slot)) };
@@ -206,11 +211,41 @@ impl StudioApp {
 
 fn start_tab(ui: &mut egui::Ui, km: &Keymap) {
     ui.label(
-        RichText::new("Six étapes pour passer d'une scène vide à une vidéo. Les touches affichées suivent vos réglages.")
-            .weak(),
+        RichText::new(tr!(
+            "Six étapes pour passer d'une scène vide à une vidéo. Les touches affichées suivent vos réglages.",
+            "Six steps from an empty scene to a video. The keys shown follow your settings."
+        ))
+        .weak(),
     );
     ui.add_space(10.0);
 
+    if crate::i18n::en() {
+        step(ui, km, 1, "Add models", "Click **Create soldier**, or double-click an asset in the list on the left.", &[
+            "[Right click] an asset to **merge** it (head, helmet) or **attach it to a bone** (a weapon on R_WEAPON).",
+        ]);
+        step(ui, km, 2, "Select a bone", "[Left click] a joint in the viewport, or a bone in the tree on the right.", &[]);
+        step(ui, km, 3, "Pose", "Rotate the bone with the gizmo, or type its angles in the inspector.", &[
+            "Red, green and blue rings: local axes. Grey ring: free rotation.",
+            "Rotation gizmo {gizmo_rotate}, translation gizmo {gizmo_translate}.",
+            "Every change sets a key on the current frame. {set_key} sets one by hand.",
+        ]);
+        step(ui, km, 4, "Animate", "Move to another frame in the timeline, then pose again: playback interpolates between keys.", &[
+            "Previous frame {prev_frame}, next {next_frame}, play {play_pause}.",
+            "Drag a diamond to move a key, [Right click] it to delete it.",
+        ]);
+        step(ui, km, 5, "Film", "The **shot camera** 🎥 films, the **work camera** 🛠 is for posing. {toggle_camera} switches between them.", &[
+            "In Shot view, flying (right click + {fly_forward} {fly_left} {fly_back} {fly_right}), the wheel, orbiting and framing {frame_selection} drive the shot camera. If it has keys, every move sets one.",
+            "**📷 Copy view** (timeline) puts the shot camera on the work view.",
+            "Animate the camera: on each frame you want, frame the shot then **🔑 Key** (Shot) or {set_key} with no actor selected. In Work view, the key takes the work view.",
+            "The monitor at the top right shows what it films: click it to switch to it.",
+        ]);
+        step(ui, km, 6, "Export", "{photo} or File > Photo: the current frame as a PNG.", &[
+            "File > Export: MP4 video or PNG sequence.",
+            "{save} saves the project. {undo} undoes, {redo} redoes.",
+            "The project also saves itself (every 2 min and on close): setting in the File menu.",
+        ]);
+        return;
+    }
     step(ui, km, 1, "Ajouter des modèles", "Cliquez sur **Créer le soldat**, ou double-cliquez sur un asset dans la liste de gauche.", &[
         "[Clic droit] sur un asset pour le **fusionner** (tête, casque) ou l'**attacher à un os** (une arme sur R_WEAPON).",
     ]);
@@ -238,48 +273,89 @@ fn start_tab(ui: &mut egui::Ui, km: &Keymap) {
 }
 
 fn mouse_tab(ui: &mut egui::Ui, km: &Keymap) {
-    heading(ui, "🚁 Vol libre (drone)");
+    heading(ui, tr!("🚁 Vol libre (drone)", "🚁 Free flight (drone)"));
     ui.label(
-        RichText::new(
-            "La caméra se pilote comme un drone ou la caméra d'observateur d'un jeu : on regarde avec la              souris en tenant le clic droit, et on vole au clavier.",
-        )
+        RichText::new(tr!(
+            "La caméra se pilote comme un drone ou la caméra d'observateur d'un jeu : on regarde avec la \
+             souris en tenant le clic droit, et on vole au clavier.",
+            "The camera flies like a drone or a game's spectator camera: look around with the mouse \
+             while holding the right button, and fly with the keyboard."
+        ))
         .weak(),
     );
     ui.add_space(4.0);
-    table(ui, km, "fly", &[
-        ("Regarder autour", "[Clic droit] tenu (le curseur disparaît)"),
-        ("Avancer / reculer", "{fly_forward} / {fly_back}"),
-        ("Gauche / droite", "{fly_left} / {fly_right}"),
-        ("Monter / descendre", "{fly_up_rmb} / {fly_down_rmb} en tenant le clic droit, ou {fly_up} / {fly_down}"),
-        ("Plus vite", "[Maj] tenue"),
-        ("Régler la vitesse", "[Clic droit] + [Molette], ou le menu 🚁 de la vue"),
-        ("Avancer d'un cran", "[Molette]"),
-    ]);
+    if crate::i18n::en() {
+        table(ui, km, "fly", &[
+            ("Look around", "[Right click] held (the cursor disappears)"),
+            ("Forward / back", "{fly_forward} / {fly_back}"),
+            ("Left / right", "{fly_left} / {fly_right}"),
+            ("Up / down", "{fly_up_rmb} / {fly_down_rmb} while holding the right button, or {fly_up} / {fly_down}"),
+            ("Faster", "[Shift] held"),
+            ("Adjust speed", "[Right click] + [Wheel], or the viewport's 🚁 menu"),
+            ("Step forward", "[Wheel]"),
+        ]);
+    } else {
+        table(ui, km, "fly", &[
+            ("Regarder autour", "[Clic droit] tenu (le curseur disparaît)"),
+            ("Avancer / reculer", "{fly_forward} / {fly_back}"),
+            ("Gauche / droite", "{fly_left} / {fly_right}"),
+            ("Monter / descendre", "{fly_up_rmb} / {fly_down_rmb} en tenant le clic droit, ou {fly_up} / {fly_down}"),
+            ("Plus vite", "[Maj] tenue"),
+            ("Régler la vitesse", "[Clic droit] + [Molette], ou le menu 🚁 de la vue"),
+            ("Avancer d'un cran", "[Molette]"),
+        ]);
+    }
     ui.add_space(4.0);
     ui.label(
-        RichText::new(
-            "On avance dans la direction du regard. Le menu 🚁 en haut de la vue règle aussi la              sensibilité de la souris, l'inertie (accélération et freinage en douceur) et l'inversion verticale.",
-        )
+        RichText::new(tr!(
+            "On avance dans la direction du regard. Le menu 🚁 en haut de la vue règle aussi la \
+             sensibilité de la souris, l'inertie (accélération et freinage en douceur) et l'inversion verticale.",
+            "You move in the direction you look. The 🚁 menu at the top of the viewport also sets mouse \
+             sensitivity, inertia (smooth acceleration and braking) and vertical inversion."
+        ))
         .weak(),
     );
 
-    heading(ui, "🖱 Autour de la sélection");
-    table(ui, km, "mouse", &[
-        ("Orbiter autour du point visé", "[Alt] + [Clic gauche]"),
-        ("Glisser la vue", "[Clic milieu], ou [Alt] + [Maj] + [Clic gauche]"),
-        ("Sélectionner un os", "[Clic gauche] sur une articulation"),
-        ("Déplacer un personnage au sol", "[Clic gauche] tenu sur son corps, puis glisser ([Ctrl] : aimanté à la grille)"),
-        ("Cadrer la sélection", "{frame_selection} (le point d'orbite passe sur elle)"),
-        ("Copier la pose du personnage", "[Ctrl] + [C], ou clic droit sur lui dans la liste Scène"),
-        ("Coller la pose sur un autre", "[Ctrl] + [V] ([Ctrl] + [Maj] + [V] : en miroir)"),
-        ("Placer un personnage au même endroit qu'un autre", "Copier la pose du premier, puis clic droit > Coller la position"),
-        ("Tourner la grille au sol", "Affichage > Grille > Rotation"),
-    ]);
+    heading(ui, tr!("🖱 Autour de la sélection", "🖱 Around the selection"));
+    if crate::i18n::en() {
+        table(ui, km, "mouse", &[
+            ("Orbit around the target point", "[Alt] + [Left click]"),
+            ("Pan the view", "[Middle click], or [Alt] + [Shift] + [Left click]"),
+            ("Select a bone", "[Left click] a joint"),
+            ("Move a character on the ground", "[Left click] held on its body, then drag ([Ctrl]: snap to grid)"),
+            ("Frame the selection", "{frame_selection} (the orbit point moves onto it)"),
+            ("Copy the character's pose", "[Ctrl] + [C], or right click it in the Scene list"),
+            ("Paste the pose onto another", "[Ctrl] + [V] ([Ctrl] + [Shift] + [V]: mirrored)"),
+            ("Put a character where another one is", "Copy the first one's pose, then right click > Paste position"),
+            ("Rotate the ground grid", "View > Grid > Rotation"),
+        ]);
+    } else {
+        table(ui, km, "mouse", &[
+            ("Orbiter autour du point visé", "[Alt] + [Clic gauche]"),
+            ("Glisser la vue", "[Clic milieu], ou [Alt] + [Maj] + [Clic gauche]"),
+            ("Sélectionner un os", "[Clic gauche] sur une articulation"),
+            ("Déplacer un personnage au sol", "[Clic gauche] tenu sur son corps, puis glisser ([Ctrl] : aimanté à la grille)"),
+            ("Cadrer la sélection", "{frame_selection} (le point d'orbite passe sur elle)"),
+            ("Copier la pose du personnage", "[Ctrl] + [C], ou clic droit sur lui dans la liste Scène"),
+            ("Coller la pose sur un autre", "[Ctrl] + [V] ([Ctrl] + [Maj] + [V] : en miroir)"),
+            ("Placer un personnage au même endroit qu'un autre", "Copier la pose du premier, puis clic droit > Coller la position"),
+            ("Tourner la grille au sol", "Affichage > Grille > Rotation"),
+        ]);
+    }
 
-    heading(ui, "🎥 Les deux caméras");
-    bullet(ui, km, "**Caméra de travail** 🛠 : libre, pour poser et régler la scène. Elle n'est jamais rendue.");
-    bullet(ui, km, "**Caméra de prise** 🎥 : celle de la photo et de la vidéo. Fixe au départ, elle devient animée dès qu'on lui pose une clé.");
-    bullet(ui, km, "{toggle_camera} bascule de l'une à l'autre. En vue Prise, souris et clavier pilotent la caméra de prise.");
+    heading(ui, tr!("🎥 Les deux caméras", "🎥 The two cameras"));
+    bullet(ui, km, tr!(
+        "**Caméra de travail** 🛠 : libre, pour poser et régler la scène. Elle n'est jamais rendue.",
+        "**Work camera** 🛠: free, for posing and setting up the scene. It is never rendered."
+    ));
+    bullet(ui, km, tr!(
+        "**Caméra de prise** 🎥 : celle de la photo et de la vidéo. Fixe au départ, elle devient animée dès qu'on lui pose une clé.",
+        "**Shot camera** 🎥: the one used for photos and videos. Still at first, it becomes animated as soon as it gets a key."
+    ));
+    bullet(ui, km, tr!(
+        "{toggle_camera} bascule de l'une à l'autre. En vue Prise, souris et clavier pilotent la caméra de prise.",
+        "{toggle_camera} switches between them. In Shot view, the mouse and keyboard drive the shot camera."
+    ));
 }
 
 // ------------------------------------------------------------------ mise en forme
@@ -388,11 +464,11 @@ fn rich(ui: &mut egui::Ui, km: &Keymap, text: &str) {
 fn action_keys(ui: &mut egui::Ui, km: &Keymap, a: Action) {
     let labels: Vec<String> = (0..2).filter_map(|s| km.slot_label(a, s)).collect();
     if labels.is_empty() {
-        ui.label(RichText::new("(aucune touche)").weak().italics());
+        ui.label(RichText::new(tr!("(aucune touche)", "(no key)")).weak().italics());
     }
     for (i, l) in labels.iter().enumerate() {
         if i > 0 {
-            ui.label(" ou ");
+            ui.label(tr!(" ou ", " or "));
         }
         keycap(ui, l);
     }

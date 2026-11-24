@@ -29,25 +29,25 @@ impl Move {
 
     pub fn label(self) -> &'static str {
         match self {
-            Move::Orbit360 => "⟳ Tour 360°",
-            Move::Orbit180 => "◠ Demi-tour 180°",
-            Move::Arc90 => "◜ Arc 90°",
-            Move::Spiral => "🌀 Spirale montante",
-            Move::PushIn => "➡ Travelling avant",
-            Move::PullOut => "⬅ Travelling arrière",
-            Move::Crane => "⬆ Grue",
+            Move::Orbit360 => tr!("⟳ Tour 360°", "⟳ Orbit 360°"),
+            Move::Orbit180 => tr!("◠ Demi-tour 180°", "◠ Half orbit 180°"),
+            Move::Arc90 => tr!("◜ Arc 90°", "◜ Arc 90°"),
+            Move::Spiral => tr!("🌀 Spirale montante", "🌀 Rising spiral"),
+            Move::PushIn => tr!("➡ Travelling avant", "➡ Push in"),
+            Move::PullOut => tr!("⬅ Travelling arrière", "⬅ Pull out"),
+            Move::Crane => tr!("⬆ Grue", "⬆ Crane"),
         }
     }
 
     pub fn hint(self) -> &'static str {
         match self {
-            Move::Orbit360 => "Un tour complet autour du personnage, à distance constante",
-            Move::Orbit180 => "Un demi-tour : de face jusqu'au dos (ou depuis le côté choisi)",
-            Move::Arc90 => "Un quart de tour, lent et discret",
-            Move::Spiral => "Un tour complet en montant : de la contre-plongée à la plongée",
-            Move::PushIn => "La caméra s'approche du personnage jusqu'au cadrage choisi",
-            Move::PullOut => "La caméra part du cadrage choisi et recule",
-            Move::Crane => "La caméra monte en restant tournée vers le personnage",
+            Move::Orbit360 => tr!("Un tour complet autour du personnage, à distance constante", "A full turn around the character, at a constant distance"),
+            Move::Orbit180 => tr!("Un demi-tour : de face jusqu'au dos (ou depuis le côté choisi)", "Half a turn: from the front to the back (or from the chosen side)"),
+            Move::Arc90 => tr!("Un quart de tour, lent et discret", "A quarter turn, slow and subtle"),
+            Move::Spiral => tr!("Un tour complet en montant : de la contre-plongée à la plongée", "A full turn while rising: from a low angle to a high angle"),
+            Move::PushIn => tr!("La caméra s'approche du personnage jusqu'au cadrage choisi", "The camera moves in on the character up to the chosen framing"),
+            Move::PullOut => tr!("La caméra part du cadrage choisi et recule", "The camera starts at the chosen framing and moves back"),
+            Move::Crane => tr!("La caméra monte en restant tournée vers le personnage", "The camera rises while staying aimed at the character"),
         }
     }
 
@@ -77,11 +77,11 @@ impl Framing {
 
     pub fn label(self) -> &'static str {
         match self {
-            Framing::CloseUp => "Gros plan (visage)",
-            Framing::Feet => "Gros plan (pieds)",
-            Framing::Medium => "Plan taille",
-            Framing::Full => "Plan en pied",
-            Framing::Wide => "Plan large",
+            Framing::CloseUp => tr!("Gros plan (visage)", "Close-up (face)"),
+            Framing::Feet => tr!("Gros plan (pieds)", "Close-up (feet)"),
+            Framing::Medium => tr!("Plan taille", "Medium shot"),
+            Framing::Full => tr!("Plan en pied", "Full shot"),
+            Framing::Wide => tr!("Plan large", "Wide shot"),
         }
     }
 
@@ -123,10 +123,10 @@ impl Height {
 
     pub fn label(self) -> &'static str {
         match self {
-            Height::Low => "Contre-plongée",
-            Height::Eye => "À hauteur",
-            Height::High => "Plongée",
-            Height::Top => "Vue du dessus",
+            Height::Low => tr!("Contre-plongée", "Low angle"),
+            Height::Eye => tr!("À hauteur", "Eye level"),
+            Height::High => tr!("Plongée", "High angle"),
+            Height::Top => tr!("Vue du dessus", "Top view"),
         }
     }
 
@@ -158,12 +158,12 @@ impl Side {
 
     pub fn label(self) -> &'static str {
         match self {
-            Side::Front => "Face",
-            Side::ThreeQuarterRight => "Trois-quarts droit",
-            Side::ProfileRight => "Profil droit",
-            Side::Back => "Dos",
-            Side::ProfileLeft => "Profil gauche",
-            Side::ThreeQuarterLeft => "Trois-quarts gauche",
+            Side::Front => tr!("Face", "Front"),
+            Side::ThreeQuarterRight => tr!("Trois-quarts droit", "Three-quarter right"),
+            Side::ProfileRight => tr!("Profil droit", "Right profile"),
+            Side::Back => tr!("Dos", "Back"),
+            Side::ProfileLeft => tr!("Profil gauche", "Left profile"),
+            Side::ThreeQuarterLeft => tr!("Trois-quarts gauche", "Three-quarter left"),
         }
     }
 
