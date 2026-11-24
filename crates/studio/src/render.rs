@@ -1361,7 +1361,7 @@ struct PartU {
     color: vec4<f32>,
     // temps (s), durée de vie (s), part du soleil, bascule
     misc: vec4<f32>,
-    // taille de l'image (pixels)
+    // taille de l'image (pixels), battement des images (images/s), lumière propre
     view: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> pu: PartU;
@@ -1448,7 +1448,13 @@ fn vs_particle(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u3
     let frame_r = rnd(&s);
     let size_r = rnd(&s);
     let rate = mix(pu.motion.z, pu.motion.w, rnd(&s)) * select(-1.0, 1.0, rnd(&s) > 0.5);
-    let ang0 = rnd(&s) * 6.2831853;
+    var ang0 = rnd(&s) * 6.2831853;
+    let flap = pu.view.z;
+    let flap_r = 0.8 + 0.4 * rnd(&s);
+    if (flap > 0.0) {
+        // papillon : à peu près droit à l'écran, penché de ±20°
+        ang0 = (ang0 / 3.1415927 - 1.0) * 0.35;
+    }
     let f = (cam - q) / max(d, 1e-3);
     var right = cross(vec3<f32>(0.0, 1.0, 0.0), f);
     if (length(right) < 1e-3) {
@@ -1505,7 +1511,11 @@ fn vs_particle(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u3
     let wp = q + ax * (c.x * hx) + ay * (c.y * hy);
     o.clip = g.view_proj * vec4<f32>(wp, 1.0);
     let frames = max(pu.size.w, 1.0);
-    let frame = min(floor(frame_r * frames), frames - 1.0);
+    var frame = min(floor(frame_r * frames), frames - 1.0);
+    if (flap > 0.0) {
+        // battement : la bande défile, chaque particule à son rythme et à sa phase
+        frame = floor(t * flap * flap_r + frame_r * frames) % frames;
+    }
     o.uv = vec2<f32>((frame + c.x * 0.5 + 0.5) / frames, 0.5 - c.y * 0.5);
     o.wpos = q;
     o.alpha = min(a, 1.0) * pu.color.a;
@@ -1527,7 +1537,7 @@ fn fs_particle(i: POut) -> @location(0) vec4<f32> {
     } else {
         amb = vec3<f32>(0.32 * g.flags.z);
     }
-    var c = tex.rgb * pu.color.rgb * (amb + g.sun.rgb * pu.misc.z * lit) * g.quality.y;
+    var c = tex.rgb * pu.color.rgb * (amb + g.sun.rgb * pu.misc.z * lit + vec3<f32>(pu.view.w)) * g.quality.y;
     c = apply_fog(c, i.wpos);
     return vec4<f32>(c * a, a);
 }
@@ -2107,6 +2117,9 @@ pub struct Renderer {
     ff_decor_pipeline: wgpu::RenderPipeline,
     /// décor chargé d'une carte (instances regroupées par modèle)
     decor: Option<GpuDecor>,
+    /// flore du sol autour de la caméra (même repère que `decor`, remplacée quand la caméra se
+    /// déplace : voir [`crate::decor::GroundFlora`])
+    flora: Option<GpuDecor>,
     /// affiche le décor
     pub decor_visible: bool,
     /// lumières placées du décor (repère du studio, avant le relèvement du sol)
@@ -2758,6 +2771,7 @@ impl Renderer {
             ff_mesh_pipeline,
             ff_decor_pipeline,
             decor: None,
+            flora: None,
             decor_visible: true,
             decor_lights: Vec::new(),
             decor_lights_on: true,
@@ -3122,7 +3136,7 @@ impl Renderer {
             size: [layer.size[0] * size, layer.size[1] * size, layer.stretch, layer.frames.max(1) as f32],
             color: [layer.color[0], layer.color[1], layer.color[2], layer.alpha],
             misc: [self.particle_time.max(0.0), layer.life, layer.sun, if layer.tumble { 1.0 } else { 0.0 }],
-            view: [width as f32, height as f32, 0.0, 0.0],
+            view: [width as f32, height as f32, layer.flap.max(0.0), layer.glow.max(0.0)],
         };
         (u, count)
     }
@@ -3808,9 +3822,23 @@ impl Renderer {
     pub fn set_decor(&mut self, instances: &[DecorInstance], ground: f32) {
         self.decor_base_ground = ground;
         self.decor_ground = ground;
+        self.decor = self.build_decor(instances);
+        self.flora = None;
+    }
+
+    /// Remplace la flore du sol (instances dans le repère de [`Self::set_decor`]) ; elle suit le
+    /// relèvement du sol du décor.
+    pub fn set_flora(&mut self, instances: &[DecorInstance]) {
+        self.flora = self.build_decor(instances);
+        let lift = self.decor_base_ground - self.decor_ground;
+        if let Some(f) = self.flora.as_mut() {
+            Self::lift_decor(&self.queue, f, lift);
+        }
+    }
+
+    fn build_decor(&self, instances: &[DecorInstance]) -> Option<GpuDecor> {
         if instances.is_empty() {
-            self.decor = None;
-            return;
+            return None;
         }
         let mut order: Vec<usize> = (0..instances.len()).collect();
         order.sort_by(|&a, &b| {
@@ -3871,7 +3899,7 @@ impl Renderer {
         if lo.x > hi.x {
             (lo, hi) = (Vec3::ZERO, Vec3::ZERO);
         }
-        self.decor = Some(GpuDecor { bind, buf, _uniform: uniform, batches, bounds: (lo, hi), mats, lift: 0.0 });
+        Some(GpuDecor { bind, buf, _uniform: uniform, batches, bounds: (lo, hi), mats, lift: 0.0 })
     }
 
     /// Nappes d'eau du décor dessiné (instances des maillages d'eau), pour les sillages.
@@ -3903,7 +3931,13 @@ impl Renderer {
     pub fn set_decor_ground(&mut self, ground: f32) {
         self.decor_ground = ground;
         let lift = self.decor_base_ground - ground;
-        let Some(d) = self.decor.as_mut() else { return };
+        for d in [self.decor.as_mut(), self.flora.as_mut()].into_iter().flatten() {
+            Self::lift_decor(&self.queue, d, lift);
+        }
+    }
+
+    /// Décale en hauteur les instances d'un décor (`lift` : depuis leurs matrices chargées).
+    fn lift_decor(queue: &wgpu::Queue, d: &mut GpuDecor, lift: f32) {
         if (lift - d.lift).abs() < 1e-6 {
             return;
         }
@@ -3916,7 +3950,7 @@ impl Renderer {
                 m
             })
             .collect();
-        self.queue.write_buffer(&d.buf, 0, bytemuck::cast_slice(&shifted));
+        queue.write_buffer(&d.buf, 0, bytemuck::cast_slice(&shifted));
         let dy = Vec3::Y * (lift - d.lift);
         d.bounds = (d.bounds.0 + dy, d.bounds.1 + dy);
         d.lift = lift;
@@ -3924,6 +3958,7 @@ impl Renderer {
 
     pub fn clear_decor(&mut self) {
         self.decor = None;
+        self.flora = None;
         self.decor_terrain = false;
         self.set_sky(None);
         self.forget_prefix("terrain/");
@@ -4107,7 +4142,8 @@ impl Renderer {
         }
         if self.decor_active() {
             let mut created: Vec<(String, wgpu::BindGroup)> = Vec::new();
-            for b in &self.decor.as_ref().unwrap().batches {
+            let batches = [self.decor.as_ref(), self.flora.as_ref()].into_iter().flatten().flat_map(|d| &d.batches);
+            for b in batches {
                 let Some(model) = self.models.get(&b.asset) else { continue };
                 for m in &model.meshes {
                     let key = m.material_key(None, None);
@@ -4388,7 +4424,8 @@ impl Renderer {
                     pass.draw_indexed(0..m.index_count, 0, 0..1);
                 }
             }
-            if let Some(d) = self.decor.as_ref().filter(|_| self.decor_visible) {
+            let decors = [self.decor.as_ref(), self.flora.as_ref()];
+            for d in decors.into_iter().flatten().filter(|_| self.decor_visible) {
                 pass.set_pipeline(&self.decor_pipeline);
                 pass.set_bind_group(1, &d.bind, &[]);
                 for b in &d.batches {

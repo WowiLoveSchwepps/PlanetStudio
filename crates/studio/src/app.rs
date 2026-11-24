@@ -3446,6 +3446,9 @@ impl StudioApp {
         let reuse = self.skip_3d && self.last_render_size == Some(render_size) && self.renderer.egui_tex.is_some();
         self.renderer.ensure_viewport(&self.rs, scaled(pw), scaled(ph));
         if !reuse {
+            // flore du sol autour de la vue et de la caméra de prise (moniteur)
+            let shot_eye = self.shot_params(self.frame).eye;
+            self.follow_flora(Some(shot_eye));
             let lines = self.build_lines(&view);
             let items = self.draw_items(true);
             self.set_focus(&view);

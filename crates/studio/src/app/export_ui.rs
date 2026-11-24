@@ -1365,6 +1365,7 @@ impl StudioApp {
             ctx.request_repaint_after(Duration::from_millis(500));
             return;
         }
+        self.follow_flora(Some(view.eye));
         let items = self.draw_items(false);
         self.set_focus(&view);
         let lines = if grid { self.ground_grid() } else { Lines::default() };
@@ -2203,6 +2204,7 @@ impl StudioApp {
         self.apply_lighting_at(f);
         let view = self.real_shot(f);
         self.set_focus(&view);
+        self.follow_flora(Some(view.eye));
         let items = self.draw_items(false);
         let lines = if self.export.grid { self.ground_grid() } else { Lines::default() };
         let s = self.export.supersample.max(1);
@@ -2270,6 +2272,7 @@ impl StudioApp {
             let q = self.export_quality();
             q.apply(&mut self.renderer, self.lighting.shadows);
             let s = q.export_supersample();
+            self.follow_flora(Some(view.eye));
             let items = self.draw_items(false);
             self.set_focus(&view);
             let lines = if i.grid { self.ground_grid() } else { Lines::default() };

@@ -32,6 +32,8 @@ pub(super) struct DecorState {
     /// effet de particules dont les textures ont déjà été demandées (pas de nouvel essai à
     /// chaque image si l'une manque)
     particles_prepared: Option<crate::particles::Kind>,
+    /// flore du sol du décor affiché, posée autour des caméras
+    pub flora: Option<crate::decor::GroundFlora>,
 }
 
 impl Default for DecorState {
@@ -50,6 +52,7 @@ impl Default for DecorState {
             info: String::new(),
             sun_on_load: false,
             particles_prepared: None,
+            flora: None,
         }
     }
 }
@@ -73,6 +76,7 @@ impl StudioApp {
         self.decor.loading = false;
         self.decor.applied = None;
         self.decor.info.clear();
+        self.decor.flora = None;
         self.renderer.clear_decor();
         self.force_render = true;
     }
@@ -83,8 +87,9 @@ impl StudioApp {
         }
         self.decor.loading = false;
         match result {
-            Ok(data) => {
+            Ok(mut data) => {
                 crate::decor::upload(&mut self.renderer, &data);
+                self.decor.flora = data.ground_flora.take();
                 if std::mem::take(&mut self.decor.sun_on_load) && data.settings.sun_follows {
                     if let Some(sun) = data.sky.as_ref().and_then(|k| k.sun.clone()) {
                         self.apply_sky_sun(&sun);
@@ -113,6 +118,17 @@ impl StudioApp {
                 self.decor.applied = None;
                 self.status = trf!("Impossible de charger le décor : {e}", "Could not load the scenery: {e}");
             }
+        }
+    }
+
+    /// Pose la flore du sol autour de ces caméras (positions du studio) quand elles se sont
+    /// éloignées de celle qui est affichée. La vue de travail compte toujours : elle reste à
+    /// l'écran pendant les exports, et la flore ne fait pas ainsi l'aller-retour à chaque image.
+    pub(super) fn follow_flora(&mut self, shot_eye: Option<glam::Vec3>) {
+        let eyes: Vec<glam::Vec3> = std::iter::once(self.work_view().eye).chain(shot_eye).collect();
+        let (Some(flora), Some(game)) = (self.decor.flora.as_mut(), self.game.as_ref()) else { return };
+        if let Some(instances) = flora.update(game, &eyes) {
+            self.renderer.set_flora(&instances);
         }
     }
 
