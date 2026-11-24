@@ -565,9 +565,8 @@ pub struct StudioApp {
     preview: Option<(ClipRef, Arc<DecodedClip>, Instant)>,
     /// animations FBX importées (Mixamo…), transférées sur le squelette à l'application
     fbx_clips: Vec<FbxClip>,
-    fbx_path: String,
-    /// fichiers .fbx trouvés dans Téléchargements et Documents/PlanetStudio (rafraîchis toutes les 3 s)
-    fbx_found: (Vec<PathBuf>, Option<Instant>),
+    /// dossier du dernier FBX importé, rouvert par le sélecteur de fichiers
+    fbx_last_dir: Option<PathBuf>,
 
     // décor d'une carte
     decor: decor_ui::DecorState,
@@ -589,14 +588,6 @@ struct FbxClip {
     name: String,
     path: PathBuf,
     anim: Arc<forgelight::fbx::FbxAnimation>,
-}
-
-/// Dossiers où chercher des .fbx à proposer.
-fn fbx_dirs() -> Vec<PathBuf> {
-    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from);
-    let mut v: Vec<PathBuf> = home.iter().map(|h| h.join("Downloads")).collect();
-    v.push(projects_dir());
-    v
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -886,8 +877,7 @@ impl StudioApp {
             clip_preview: true,
             preview: None,
             fbx_clips: Vec::new(),
-            fbx_path: String::new(),
-            fbx_found: (Vec::new(), None),
+            fbx_last_dir: None,
             decor: Default::default(),
             particles: Default::default(),
             post_fx: Default::default(),
@@ -4151,45 +4141,23 @@ impl StudioApp {
             ui.label(
                 egui::RichText::new(
                     tr!("Export Mixamo : format FBX Binary, « Without Skin ». Glissez le fichier sur la fenêtre, \
-                     ou choisissez-le ci-dessous. Le mouvement est transféré sur le squelette du personnage.", "Mixamo export: FBX Binary format, “Without Skin”. Drop the file on the window, or pick it below. The motion is transferred onto the character's skeleton."),
+                     ou choisissez-le avec le bouton ci-dessous. Le mouvement est transféré sur le squelette du personnage.", "Mixamo export: FBX Binary format, “Without Skin”. Drop the file on the window, or pick it below. The motion is transferred onto the character's skeleton."),
                 )
                 .small()
                 .weak(),
             );
-            let mut import = None;
-            ui.horizontal(|ui| {
-                // largeur fixe : une largeur tirée de la place disponible fait grandir le panneau à chaque image
-                ui.add(egui::TextEdit::singleline(&mut self.fbx_path).hint_text("C:\\…\\Dancing.fbx").desired_width(200.0));
-                if ui.add_enabled(!self.fbx_path.trim().is_empty(), egui::Button::new(tr!("Importer", "Import"))).clicked() {
-                    import = Some(PathBuf::from(self.fbx_path.trim().trim_matches('"')));
+            let mut import: Vec<PathBuf> = Vec::new();
+            if ui.button(tr!("📁 Importer des FBX…", "📁 Import FBX files…")).clicked() {
+                let mut dlg = rfd::FileDialog::new()
+                    .set_title(tr!("Animations FBX à importer", "FBX animations to import"))
+                    .add_filter("FBX", &["fbx", "FBX"]);
+                if let Some(dir) = self.fbx_last_dir.as_ref().filter(|d| d.is_dir()) {
+                    dlg = dlg.set_directory(dir);
                 }
-            });
-            // fichiers trouvés dans Téléchargements et Documents/PlanetStudio
-            if self.fbx_found.1.is_none_or(|t| t.elapsed().as_secs_f32() > 3.0) {
-                let mut found: Vec<(std::time::SystemTime, PathBuf)> = fbx_dirs()
-                    .iter()
-                    .filter_map(|d| std::fs::read_dir(d).ok())
-                    .flatten()
-                    .filter_map(|e| e.ok())
-                    .map(|e| e.path())
-                    .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("fbx")))
-                    .map(|p| (std::fs::metadata(&p).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), p))
-                    .collect();
-                found.sort_by(|a, b| b.0.cmp(&a.0));
-                self.fbx_found = (found.into_iter().map(|(_, p)| p).take(12).collect(), Some(Instant::now()));
-            }
-            let fresh: Vec<PathBuf> =
-                self.fbx_found.0.iter().filter(|p| !self.fbx_clips.iter().any(|c| &c.path == *p)).cloned().collect();
-            if !fresh.is_empty() {
-                ui.label(egui::RichText::new(tr!("Fichiers trouvés (Téléchargements, Documents/PlanetStudio) :", "Files found (Downloads, Documents/PlanetStudio):")).small());
-                ui.horizontal_wrapped(|ui| {
-                    for p in fresh {
-                        let name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
-                        if ui.small_button(format!("➕ {name}")).on_hover_text(p.display().to_string()).clicked() {
-                            import = Some(p);
-                        }
-                    }
-                });
+                if let Some(files) = dlg.pick_files() {
+                    self.fbx_last_dir = files.first().and_then(|p| p.parent()).map(PathBuf::from);
+                    import = files;
+                }
             }
             let mut clicked = None;
             let mut double = None;
@@ -4210,7 +4178,7 @@ impl StudioApp {
                     }
                 });
             }
-            if let Some(p) = import {
+            for p in import {
                 self.import_fbx(p);
             }
             if let Some(i) = clicked {
