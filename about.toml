@@ -1,0 +1,22 @@
+# Licences acceptées pour les dépendances (cargo-about), utilisé par le workflow de Release
+# pour générer THIRD_PARTY_LICENSES.txt.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+targets = ["x86_64-pc-windows-msvc"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+# crates du projet (publish = false) : sous GPL, pas des bibliothèques tierces
+private = { ignore = true }

@@ -1,0 +1,15 @@
+Licences des bibliothèques incluses dans PlanetStudio
+=====================================================
+
+PlanetStudio est distribué sous la licence GNU GPL version 3 ou ultérieure (fichier LICENSE).
+Il inclut les bibliothèques suivantes, chacune sous sa propre licence.
+
+{{#each licenses}}
+--------------------------------------------------------------------------------
+{{{name}}} ({{{id}}})
+Utilisée par : {{#each used_by}}{{{crate.name}}} {{{crate.version}}}{{#unless @last}}, {{/unless}}{{/each}}
+--------------------------------------------------------------------------------
+
+{{{text}}}
+
+{{/each}}

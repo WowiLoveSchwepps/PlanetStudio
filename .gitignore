@@ -1,0 +1,6 @@
+/target
+/THIRD_PARTY_LICENSES.txt
+# fichier extrait du jeu (propriété de Daybreak) : jamais publié
+/indar_starfield.xml
+# ancienne copie locale du code, remplacée par l historique git
+/sauvegarde/

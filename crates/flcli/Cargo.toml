@@ -1,0 +1,17 @@
+[package]
+name = "flcli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Outil en ligne de commande pour explorer/extraire les assets PlanetSide 2"
+
+[[bin]]
+name = "flcli"
+path = "src/main.rs"
+
+[dependencies]
+forgelight = { path = "../forgelight" }
+anyhow.workspace = true
+glam.workspace = true
+png = "0.17"

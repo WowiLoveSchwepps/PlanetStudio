@@ -1,0 +1,61 @@
+# Publie une Release quand un tag de version est poussé :
+#   git tag v0.2.0
+#   git push origin v0.2.0
+# Le tag doit correspondre à la version de Cargo.toml ([workspace.package] version).
+# PlanetStudio lit cette Release pour proposer la mise à jour (crates/studio/src/update.rs).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version du tag = version de Cargo.toml
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
+          if ($tag -ne $ver) { Write-Error "Tag v$tag different de la version de Cargo.toml ($ver)"; exit 1 }
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Tests
+        run: cargo test --release -p planet-studio
+
+      - name: Compilation
+        run: cargo build --release -p planet-studio
+
+      - name: Licences des dépendances
+        run: |
+          cargo install cargo-about --version 0.9.3 --locked --features cli
+          cargo about generate about.hbs --output-file THIRD_PARTY_LICENSES.txt
+
+      - name: Archive et empreinte
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/planet-studio.exe dist/
+          Copy-Item LICENSE dist/LICENSE.txt
+          Copy-Item THIRD_PARTY_LICENSES.txt dist/
+          Compress-Archive -Path dist/* -DestinationPath PlanetStudio-windows-x64.zip
+          $hash = (Get-FileHash PlanetStudio-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  PlanetStudio-windows-x64.zip" | Out-File -Encoding ascii -NoNewline PlanetStudio-windows-x64.zip.sha256
+
+      - name: Publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            PlanetStudio-windows-x64.zip PlanetStudio-windows-x64.zip.sha256 `
+            --title "PlanetStudio ${{ github.ref_name }}" --generate-notes

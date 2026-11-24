@@ -1,0 +1,17 @@
+[package]
+name = "forgelight"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Lecture des assets du moteur Forgelight (PlanetSide 2) : pack2, DME, DMAT, ADR, DDS"
+
+[dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+roxmltree = "0.20"
+texture2ddecoder = "0.1"
+half = "2"
+bytemuck = { version = "1", features = ["derive"] }
+glam.workspace = true
+anyhow.workspace = true
+rayon.workspace = true
