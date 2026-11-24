@@ -1,5 +1,5 @@
 //! Particules d'ambiance des continents : feuilles qui tombent sur Hossin, vent de sable sur
-//! Indar, neige sur Esamir.
+//! Indar, neige sur Esamir, papillons sur Amerish.
 //!
 //! Les textures sont celles des effets du jeu, et les ordres de grandeur (tailles, vitesses,
 //! rotation des feuilles) en viennent aussi :
@@ -8,7 +8,9 @@
 //!   `Leaves_Desert_Blowing.xml` (`leaves_desert.dds`, brindilles sèches) ; les grains de sable
 //!   reprennent les éclats de `snow_strip.dds`, teintés et étirés dans le sens du vent ;
 //! - Esamir : `Snow_Blowing_01.xml` et `Nexus_Snow_Standard_01.xml` (`snow_strip.dds`, 8 flocons,
-//!   et `smoke_mist.dds` pour la neige soufflée au ras du sol).
+//!   et `smoke_mist.dds` pour la neige soufflée au ras du sol) ;
+//! - Amerish : `Bugs_Butterflies_01.xml` (`Bugs_Butterflies_strip.dds`, 8 images d'un battement
+//!   d'ailes), papillons verts lumineux qui tournent en rond à quelques mètres du sol.
 //!
 //! Tout est calculé sur le GPU à partir du temps de la timeline : la position d'une particule ne
 //! dépend que de son numéro et de l'instant. La lecture, le retour en arrière et l'export vidéo
@@ -27,10 +29,11 @@ pub enum Kind {
     Feuilles,
     Sable,
     Neige,
+    Papillons,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 5] = [Kind::Auto, Kind::Aucune, Kind::Feuilles, Kind::Sable, Kind::Neige];
+    pub const ALL: [Kind; 6] = [Kind::Auto, Kind::Aucune, Kind::Feuilles, Kind::Sable, Kind::Neige, Kind::Papillons];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -39,6 +42,7 @@ impl Kind {
             Kind::Feuilles => tr!("🍃 Feuilles qui tombent (Hossin)", "🍃 Falling leaves (Hossin)"),
             Kind::Sable => tr!("🌪 Vent de sable (Indar)", "🌪 Sandstorm (Indar)"),
             Kind::Neige => tr!("❄ Neige (Esamir)", "❄ Snow (Esamir)"),
+            Kind::Papillons => tr!("🦋 Papillons (Amerish)", "🦋 Butterflies (Amerish)"),
         }
     }
 
@@ -49,6 +53,7 @@ impl Kind {
             Kind::Feuilles => "feuilles",
             Kind::Sable => "sable",
             Kind::Neige => "neige",
+            Kind::Papillons => "papillons",
         }
     }
 
@@ -59,6 +64,7 @@ impl Kind {
             "hossin" | "leaves" => Some(Kind::Feuilles),
             "indar" | "sand" => Some(Kind::Sable),
             "esamir" | "snow" => Some(Kind::Neige),
+            "amerish" | "butterflies" => Some(Kind::Papillons),
             _ => None,
         })
     }
@@ -71,6 +77,7 @@ impl Kind {
                 Some("hossin") => Some(Kind::Feuilles),
                 Some("indar") => Some(Kind::Sable),
                 Some("esamir") => Some(Kind::Neige),
+                Some("amerish") => Some(Kind::Papillons),
                 _ => None,
             },
             k => Some(k),
@@ -83,6 +90,7 @@ impl Kind {
             Kind::Feuilles => &LEAVES,
             Kind::Sable => &SAND,
             Kind::Neige => &SNOW,
+            Kind::Papillons => &BUTTERFLIES,
             Kind::Auto | Kind::Aucune => &[],
         }
     }
@@ -163,6 +171,11 @@ pub struct Layer {
     pub life: f32,
     /// part de la lumière du soleil reçue (les particules n'ont pas de normale)
     pub sun: f32,
+    /// les images de la bande s'enchaînent à ce rythme (images/s : battement d'ailes) ; 0 : une
+    /// image tirée au hasard pour toute la vie de la particule
+    pub flap: f32,
+    /// lumière propre (la particule luit même dans le noir), en part de sa teinte
+    pub glow: f32,
 }
 
 const SNOW_STRIP: &str = "snow_strip.dds";
@@ -188,6 +201,8 @@ const LEAVES: [Layer; 2] = [
         alpha: 1.0,
         life: 14.0,
         sun: 0.6,
+        flap: 0.0,
+        glow: 0.0,
     },
     Layer {
         texture: "leaves_strip_02.dds",
@@ -208,6 +223,8 @@ const LEAVES: [Layer; 2] = [
         alpha: 1.0,
         life: 16.0,
         sun: 0.6,
+        flap: 0.0,
+        glow: 0.0,
     },
 ];
 
@@ -238,6 +255,8 @@ const SAND: [Layer; 3] = [
         alpha: 1.0,
         life: 9.0,
         sun: 0.8,
+        flap: 0.0,
+        glow: 0.0,
     },
     Layer {
         texture: SNOW_STRIP,
@@ -258,6 +277,8 @@ const SAND: [Layer; 3] = [
         alpha: 0.9,
         life: 2.5,
         sun: 0.8,
+        flap: 0.0,
+        glow: 0.0,
     },
     Layer {
         texture: "leaves_desert.dds",
@@ -278,6 +299,8 @@ const SAND: [Layer; 3] = [
         alpha: 1.0,
         life: 6.0,
         sun: 0.8,
+        flap: 0.0,
+        glow: 0.0,
     },
 ];
 
@@ -302,6 +325,8 @@ const SNOW: [Layer; 3] = [
         alpha: 0.9,
         life: 10.0,
         sun: 0.7,
+        flap: 0.0,
+        glow: 0.0,
     },
     Layer {
         texture: SNOW_STRIP,
@@ -322,6 +347,8 @@ const SNOW: [Layer; 3] = [
         alpha: 0.9,
         life: 12.0,
         sun: 0.7,
+        flap: 0.0,
+        glow: 0.0,
     },
     Layer {
         texture: "smoke_mist.dds",
@@ -342,8 +369,38 @@ const SNOW: [Layer; 3] = [
         alpha: 0.5,
         life: 7.0,
         sun: 0.8,
+        flap: 0.0,
+        glow: 0.0,
     },
 ];
+
+/// Amerish : papillons (`Bugs_Butterflies_01.xml`). Le jeu en lâche une quinzaine par émetteur,
+/// dans un cylindre de 10 m de rayon et 6 m de haut, qui vivent 10 à 15 s en tournant sur des
+/// cercles de 1 à 2 m (50 à 100 °/s) ; teinte verte (0,02 0,64 0,46 → 0,09 0,91 0,42, en sRGB),
+/// luminosité 11 : ils luisent la nuit. La bande enchaîne ses 8 images 256 fois par vie
+/// (une vingtaine par seconde).
+const BUTTERFLIES: [Layer; 1] = [Layer {
+    texture: "Bugs_Butterflies_strip.dds",
+    frames: 8,
+    count: 250,
+    half: [30.0, 2.5, 30.0],
+    ground: true,
+    height_bias: 1.4,
+    fall: 0.0,
+    wind: 0.3,
+    speed_var: 0.6,
+    flutter: [1.5, 0.21],
+    spin: [0.0, 0.0],
+    tumble: false,
+    size: [0.08, 0.18],
+    stretch: 0.0,
+    color: [0.004, 0.56, 0.17],
+    alpha: 1.0,
+    life: 12.5,
+    sun: 0.8,
+    flap: 20.0,
+    glow: 6.0,
+}];
 
 /// Charge sur le GPU les textures d'un effet qui y manquent.
 pub fn prepare(renderer: &mut crate::render::Renderer, game: &forgelight::GameData, kind: Option<Kind>) {
@@ -425,7 +482,8 @@ mod tests {
         assert_eq!(Kind::Auto.resolve(Some("Hossin")), Some(Kind::Feuilles));
         assert_eq!(Kind::Auto.resolve(Some("Indar")), Some(Kind::Sable));
         assert_eq!(Kind::Auto.resolve(Some("Esamir")), Some(Kind::Neige));
-        assert_eq!(Kind::Auto.resolve(Some("Amerish")), None);
+        assert_eq!(Kind::Auto.resolve(Some("Amerish")), Some(Kind::Papillons));
+        assert_eq!(Kind::Auto.resolve(Some("VR")), None);
         assert_eq!(Kind::Auto.resolve(None), None);
         assert_eq!(Kind::Neige.resolve(None), Some(Kind::Neige));
         assert_eq!(Kind::Aucune.resolve(Some("Esamir")), None);

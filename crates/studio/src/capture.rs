@@ -21,7 +21,7 @@
 //!   [--no-sky] [--sky-hour HEURE] (ciel de la carte, choisi selon l'heure, 0 à 24 ; sans --sun*,
 //!   le soleil et l'ambiance suivent aussi l'heure) [--no-fog] [--fog-density facteur]
 //!   [--no-sun-rays] [--sun-rays facteur] (rayons du soleil : l'air éclairé, coupé par les ombres)
-//!   [--particles auto|aucune|feuilles|sable|neige] [--particles-density facteur] [--particles-size facteur]
+//!   [--particles auto|aucune|feuilles|sable|neige|papillons] [--particles-density facteur] [--particles-size facteur]
 //!   [--wind facteur] [--wind-dir degrés] (particules d'ambiance ; « auto » suit le continent du décor)
 //!   (décor d'une carte autour du point X,Z du jeu ; sans asset, seul le décor est rendu)
 //!   [--eye x,y,z] [--target x,y,z] [--fov degrés] [--size LxH] (caméra et taille d'image imposées)
@@ -111,7 +111,7 @@ pub fn run(args: &[String]) -> Result<()> {
             "--decor-lights" => decor_lights = it.next().context("--decor-lights FORCE")?.parse()?,
             "--sun-rays" => sun_rays = it.next().context("--sun-rays FACTEUR")?.parse()?,
             "--particles" => {
-                let k = it.next().context("--particles auto|aucune|feuilles|sable|neige")?;
+                let k = it.next().context("--particles auto|aucune|feuilles|sable|neige|papillons")?;
                 particles.kind = crate::particles::Kind::from_key(k).with_context(|| format!("particules « {k} » inconnues"))?;
             }
             "--particles-density" => particles.density = it.next().context("--particles-density FACTEUR")?.parse()?,
@@ -350,6 +350,13 @@ pub fn run(args: &[String]) -> Result<()> {
         println!("particules : {}", k.key());
     }
 
+    // flore du sol du décor, posée autour de la caméra juste avant chaque rendu
+    let mut ground_flora: Option<crate::decor::GroundFlora> = None;
+    let follow_flora = |flora: &mut Option<crate::decor::GroundFlora>, renderer: &mut Renderer, eye: Vec3| {
+        if let Some(i) = flora.as_mut().and_then(|f| f.update(&gd, &[eye])) {
+            renderer.set_flora(&i);
+        }
+    };
     if let Some(mut s) = decor.take() {
         s.flora = !no_flora;
         s.terrain = !no_terrain;
@@ -364,7 +371,7 @@ pub fn run(args: &[String]) -> Result<()> {
         s.ground = decor_ground;
         let t0 = std::time::Instant::now();
         let (p, t) = (Default::default(), Default::default());
-        let data = crate::decor::load(&gd, &s, &Default::default(), &p, &t)?;
+        let mut data = crate::decor::load(&gd, &s, &Default::default(), &p, &t)?;
         println!(
             "décor {} autour de ({}, {}) : {} instances, {} modèles, {} textures, {} lampes, sol à {:.1} m ({:.1}s){}",
             s.zone,
@@ -379,6 +386,7 @@ pub fn run(args: &[String]) -> Result<()> {
             if data.failed.is_empty() { String::new() } else { format!(", {} acteurs illisibles", data.failed.len()) }
         );
         crate::decor::upload(&mut renderer, &data);
+        ground_flora = data.ground_flora.take();
         renderer.haze_scale = renderer_haze.max(0.0);
         renderer.sun_glow = renderer_glow.max(0.0);
         if sky_sun && !sun_given {
@@ -399,6 +407,7 @@ pub fn run(args: &[String]) -> Result<()> {
             let (w, h) = size_arg.unwrap_or((1280, 720));
             let t0 = std::time::Instant::now();
             renderer.post_settings.focus = focus(&view);
+            follow_flora(&mut ground_flora, &mut renderer, eye);
             let rgba = renderer.render_image(view.view_proj(w as f32 / h as f32), eye, &[], &Lines::default(), w, h, ss);
             println!("rendu en {:.2}s", t0.elapsed().as_secs_f32());
             crate::app::write_png(std::path::Path::new(out), w, h, &rgba)?;
@@ -558,6 +567,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 lines.line(Vec3::new(-20.0, 0.0, g), Vec3::new(20.0, 0.0, g), [0.3, 0.3, 0.33, 0.6], false);
             }
             renderer.post_settings.focus = focus(&view);
+            follow_flora(&mut ground_flora, &mut renderer, eye);
             let img = renderer.render_image(view.view_proj(w as f32 / h as f32), eye, &items, &lines, w, h, ss);
             enc.push_blocking(img)?;
         }
@@ -586,6 +596,7 @@ pub fn run(args: &[String]) -> Result<()> {
         lines.line(Vec3::new(-3.0, 0.0, f), Vec3::new(3.0, 0.0, f), [0.3, 0.3, 0.33, 0.6], false);
     }
     renderer.post_settings.focus = focus(&view);
+    follow_flora(&mut ground_flora, &mut renderer, eye);
     let t0 = std::time::Instant::now();
     let rgba = renderer.render_image(view.view_proj(w as f32 / h as f32), eye, &items, &lines, w, h, ss);
     println!("rendu {w}×{h} (suréchantillonné {ss}×) en {:.2}s", t0.elapsed().as_secs_f32());

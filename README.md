@@ -359,8 +359,10 @@ son empreinte.
   - Tout ce qui se trouve dans le rayon choisi (30 à 1 000 m) est chargé en arrière-plan, avec ou
     sans la végétation. Le lieu devient l'origine de la scène, là où se trouvent les personnages.
   - La végétation comprend la flore du sol, posée par le jeu plante par plante (herbes, fougères,
-    broméliacées, quenouilles, nénuphars sur l'eau d'Hossin, galets d'Amerish…) jusqu'à 150 m
-    du lieu, avec la teinte propre à chaque plante.
+    broméliacées, quenouilles, nénuphars sur l'eau d'Hossin, galets d'Amerish…) avec la teinte
+    propre à chaque plante. Comme dans le jeu, elle suit la caméra : elle est posée jusqu'à 150 m
+    autour de la vue de travail et de la caméra de prise (et de la caméra de l'export), où
+    qu'elles aillent, et reposée quand l'une s'éloigne de 20 m.
   - Le terrain du jeu est chargé avec le décor (case « Terrain ») : relief détaillé (un point tous
     les 2 m, textures de 25 cm par pixel) dans le rayon, plus grossier (8 m) jusqu'à l'horizon,
     à 2,5 km. La hauteur du terrain au lieu choisi est ramenée à la grille : les personnages ont
@@ -444,13 +446,15 @@ son empreinte.
   - **Particules d'ambiance** (menu Décor > Particules) : feuilles vertes qui tombent en
     tournoyant sur Hossin, vent de sable sur Indar (nuages de poussière au ras du sol, grains
     filant en traînées, brindilles sèches), neige sur Esamir (flocons proches et lointains, neige
-    soufflée au sol). « Auto » prend l'effet du continent du décor affiché (rien sur Amerish) ;
+    soufflée au sol), papillons verts lumineux sur Amerish (ils battent des ailes en tournant à
+    quelques mètres du sol, et luisent la nuit). « Auto » prend l'effet du continent du décor affiché ;
     on peut aussi forcer un effet, même sans décor. La densité, la force et la direction du vent
     et la taille se règlent ; tout est enregistré dans le projet.
     - Les textures sont celles des effets du jeu (`leaves_strip_02.dds`, `Sand.dds`,
-      `leaves_desert.dds`, `snow_strip.dds`, `smoke_mist.dds`), et les tailles et vitesses
-      reprennent les ordres de grandeur de leurs `.xml` (`Leaves_green_HossinTreeBig_30m_loop`,
-      `Sand_GroundCover`, `Leaves_Desert_Blowing`, `Snow_Blowing_01`, `Nexus_Snow_Standard_01`).
+      `leaves_desert.dds`, `snow_strip.dds`, `smoke_mist.dds`, `Bugs_Butterflies_strip.dds`), et
+      les tailles et vitesses reprennent les ordres de grandeur de leurs `.xml`
+      (`Leaves_green_HossinTreeBig_30m_loop`, `Sand_GroundCover`, `Leaves_Desert_Blowing`,
+      `Snow_Blowing_01`, `Nexus_Snow_Standard_01`, `Bugs_Butterflies_01`).
     - Les particules suivent le temps de la timeline : elles bougent pendant la lecture, sont
       figées sur une image arrêtée, et l'export vidéo montre exactement les mêmes.
     - Elles sont éclairées par le soleil et l'ambiance, reçoivent les ombres du décor et prennent
@@ -580,7 +584,7 @@ heure. `--no-fog` retire le brouillard et `--fog-density 2` le double ; `--haze 
 voile de l'air (`--haze 2` le double), `--sun-glow 0` le halo du soleil. `--decor-lights 0` éteint
 les lampes du décor (`--decor-lights 2` les double). `--no-sun-rays` retire les
 rayons du soleil et `--sun-rays 2` les renforce.
-`--particles neige` (ou `auto`, `aucune`, `feuilles`, `sable`) choisit les particules d'ambiance
+`--particles neige` (ou `auto`, `aucune`, `feuilles`, `sable`, `papillons`) choisit les particules d'ambiance
 (« auto » par défaut, selon le continent du décor), avec `--particles-density 2`, `--particles-size 1.5`,
 `--wind 2` (force du vent) et `--wind-dir 90` (direction, en degrés ; 0 = +X). Elles sont prises à
 l'instant de `--bake-frame` (ou `--time`), à 30 images/s. Sans asset, seul le décor est rendu. `--eye x,y,z`,

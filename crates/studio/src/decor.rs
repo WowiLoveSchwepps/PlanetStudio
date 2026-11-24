@@ -151,6 +151,8 @@ pub struct DecorData {
     pub sky: Option<crate::sky::Sky>,
     /// lumières placées dans le rayon (lampes, projecteurs)
     pub lights: Vec<crate::render::DecorLight>,
+    /// flore du sol, posée ensuite autour de la caméra (`None` : végétation désactivée)
+    pub ground_flora: Option<GroundFlora>,
 }
 
 pub fn is_flora(actor: &str) -> bool {
@@ -223,13 +225,10 @@ pub fn load(
             }
         }
     }
-    if settings.flora {
-        let t = std::time::Instant::now();
-        let ground = load_ground_flora(game, &zone, &settings, to_studio);
-        eprintln!("flore du sol : {} plantes ({:.1}s)", ground.len(), t.elapsed().as_secs_f32());
-        placed.extend(ground);
-    }
-    let actors: BTreeSet<&String> = placed.iter().map(|p| &p.0).collect();
+    let ground_flora = settings.flora.then(|| GroundFlora::new(&zone, &settings));
+    let mut actors: BTreeSet<&String> = placed.iter().map(|p| &p.0).collect();
+    // modèles de la flore du sol : tous ceux de la carte, la caméra pouvant aller partout
+    actors.extend(ground_flora.iter().flat_map(|g| &g.models));
     total.store(actors.len(), Ordering::Relaxed);
     progress.store(0, Ordering::Relaxed);
 
@@ -286,6 +285,13 @@ pub fn load(
         .collect();
 
     let ok: HashSet<&String> = models.iter().map(|(a, _)| a).collect();
+    // une plante de la carte sans modèle lisible n'est pas posée (et pas signalée : la plupart
+    // ne servent pas près du lieu)
+    let mut ground_flora = ground_flora;
+    if let Some(g) = ground_flora.as_mut() {
+        g.keep_models(&ok);
+        failed.retain(|a| !g.models.contains(a));
+    }
     let mut instances: Vec<DecorInstance> = placed
         .into_iter()
         .filter(|p| ok.contains(&p.0))
@@ -314,88 +320,196 @@ pub fn load(
         })
         .map(|l| crate::render::DecorLight::from_zone(l, origin))
         .collect();
-    Ok(DecorData { settings, models, textures, instances, failed, has_terrain, sky, lights })
+    Ok(DecorData { settings, models, textures, instances, failed, has_terrain, sky, lights, ground_flora })
 }
 
 // ---------------------------------------------------------------- flore du sol
 
-/// Distance (m) jusqu'où la flore du sol (herbes, fougères, nénuphars…) est posée autour du
-/// point choisi : le jeu ne la dessine que de près, et elle compte des dizaines de milliers de
-/// plantes dans ce rayon.
+/// Distance (m) jusqu'où la flore du sol (herbes, fougères, nénuphars…) est posée autour de la
+/// caméra : le jeu ne la dessine que de près, et elle compte des dizaines de milliers de plantes
+/// dans ce rayon.
 pub const GROUND_FLORA_RADIUS: f32 = 150.0;
 
-/// Flore du sol : les plantes que le jeu a placées dans les `.cnk0` (voir [`forgelight::flora`]),
-/// dans le rayon autour du point. Chaque plante devient une instance de son modèle (`.dme`,
-/// donné par la section flore de la carte), tournée et mise à l'échelle (bornes de sa couche)
-/// d'après sa propre valeur, pour un tirage stable d'un chargement à l'autre. Pas d'ombre :
-/// trop petites, et des dizaines de milliers.
-fn load_ground_flora(
-    game: &GameData,
-    zone: &Zone,
-    settings: &DecorSettings,
-    to_studio: Mat4,
-) -> Vec<(String, Mat4, bool, Option<[f32; 3]>)> {
-    let r = GROUND_FLORA_RADIUS.min(settings.radius);
-    let [cx, cz] = settings.center;
-    // chunks de 4 × 4 tuiles de 64 m : `a` suit z, `b` suit x
-    let step = 4 * 64;
-    let range = |c: f32| ((c - r) / step as f32).floor() as i32..=((c + r) / step as f32).floor() as i32;
-    let chunks: Vec<(i32, i32)> = range(cz).flat_map(|a| range(cx).map(move |b| (a * 4, b * 4))).collect();
-    let model_of = |flora: &str| -> Option<String> {
-        zone.floras.iter().find(|f| f.name.eq_ignore_ascii_case(flora)).map(|f| f.model.clone()).filter(|m| !m.is_empty())
-    };
-    chunks
-        .par_iter()
-        .flat_map_iter(|&(a, b)| {
-            let mut out = Vec::new();
-            let name = format!("{}_{a}_{b}.cnk0", settings.zone);
-            let tiles = match game.read(&name).and_then(|d| forgelight::flora::parse_cnk0(&d)) {
-                Ok(t) => t,
-                Err(e) => {
-                    if !e.to_string().contains("introuvable") {
-                        eprintln!("flore du sol : {name} : {e:#}");
+/// La flore est reposée quand une caméra s'éloigne de plus de cette distance (m) du point
+/// autour duquel elle l'a été.
+const GROUND_FLORA_REFRESH: f32 = 20.0;
+
+/// Côté d'un chunk `.cnk0` (m) : 4 × 4 tuiles de 64 m.
+const FLORA_CHUNK: f32 = 256.0;
+
+/// Une plante de la flore du sol, en coordonnées du jeu.
+#[derive(Clone, Copy, Debug)]
+struct Plant {
+    pos: [f32; 3],
+    yaw: f32,
+    scale: f32,
+    /// rang du modèle dans [`GroundFlora::models`]
+    model: u16,
+    /// teinte (linéaire)
+    tint: [f32; 3],
+}
+
+/// Flore du sol : les plantes que le jeu a placées dans les `.cnk0` (voir [`forgelight::flora`]).
+///
+/// Comme dans le jeu, elle n'est posée qu'autour de la caméra, et non du point choisi pour le
+/// décor : les chunks sont lus à la demande quand la caméra se déplace, et oubliés quand elle
+/// s'en éloigne. Chaque plante devient une instance de son modèle (`.dme`, donné par la section
+/// flore de la carte), tournée et mise à l'échelle (bornes de sa couche) d'après sa propre valeur,
+/// pour un tirage stable d'un chargement à l'autre. Pas d'ombre : trop petites, et des dizaines
+/// de milliers.
+pub struct GroundFlora {
+    zone: String,
+    /// modèles des plantes de la carte
+    pub models: Vec<String>,
+    /// (écosystème, couche) → (modèle, échelle min, échelle max)
+    layers: std::collections::HashMap<(u32, usize), (u16, f32, f32)>,
+    /// point choisi pour le décor (x, z du jeu) : origine horizontale du studio
+    center: [f32; 2],
+    /// hauteur du jeu ramenée à y = 0 dans les matrices (celle du chargement)
+    ground: f32,
+    /// plantes des chunks lus, par chunk (a, b)
+    chunks: std::collections::HashMap<(i32, i32), Arc<Vec<Plant>>>,
+    /// points (x, z du jeu) autour desquels la flore affichée a été posée
+    centers: Vec<[f32; 2]>,
+}
+
+impl GroundFlora {
+    pub fn new(zone: &Zone, settings: &DecorSettings) -> Self {
+        let mut models: Vec<String> = Vec::new();
+        let mut layers = std::collections::HashMap::new();
+        for eco in &zone.ecos {
+            for (li, layer) in eco.flora.iter().enumerate() {
+                let found = zone.floras.iter().find(|f| f.name.eq_ignore_ascii_case(&layer.flora));
+                let Some(model) = found.map(|f| f.model.clone()).filter(|m| !m.is_empty()) else { continue };
+                let k = match models.iter().position(|m| *m == model) {
+                    Some(k) => k,
+                    None => {
+                        models.push(model);
+                        models.len() - 1
                     }
-                    return out.into_iter();
+                };
+                layers.insert((eco.index, li), (k as u16, layer.min_scale, layer.max_scale));
+            }
+        }
+        Self {
+            zone: settings.zone.clone(),
+            models,
+            layers,
+            center: settings.center,
+            ground: settings.ground.unwrap_or(0.0),
+            chunks: Default::default(),
+            centers: Vec::new(),
+        }
+    }
+
+    /// Ne garde que les couches dont le modèle a pu être chargé.
+    fn keep_models(&mut self, loaded: &HashSet<&String>) {
+        let models = &self.models;
+        self.layers.retain(|_, l| loaded.contains(&models[l.0 as usize]));
+    }
+
+    /// Point du jeu (x, z) sous une position du studio.
+    fn to_game(&self, p: Vec3) -> [f32; 2] {
+        [p.x + self.center[0], p.z + self.center[1]]
+    }
+
+    /// Faut-il reposer la flore pour ces caméras (positions du studio) ?
+    pub fn needs_update(&self, eyes: &[Vec3]) -> bool {
+        let r2 = GROUND_FLORA_REFRESH * GROUND_FLORA_REFRESH;
+        self.centers.is_empty()
+            || eyes.iter().any(|e| {
+                let [x, z] = self.to_game(*e);
+                !self.centers.iter().any(|c| (c[0] - x).powi(2) + (c[1] - z).powi(2) <= r2)
+            })
+    }
+
+    /// Flore autour de ces caméras (positions du studio), si elle doit changer : lit les chunks
+    /// qui manquent, oublie ceux qui ne servent plus.
+    pub fn update(&mut self, game: &GameData, eyes: &[Vec3]) -> Option<Vec<DecorInstance>> {
+        if eyes.is_empty() || !self.needs_update(eyes) {
+            return None;
+        }
+        let t = std::time::Instant::now();
+        let centers: Vec<[f32; 2]> = eyes.iter().map(|e| self.to_game(*e)).collect();
+        let r = GROUND_FLORA_RADIUS;
+        // chunks de 4 × 4 tuiles de 64 m : `a` suit z, `b` suit x
+        let mut wanted: BTreeSet<(i32, i32)> = BTreeSet::new();
+        for [cx, cz] in &centers {
+            let range = |c: f32| ((c - r) / FLORA_CHUNK).floor() as i32..=((c + r) / FLORA_CHUNK).floor() as i32;
+            for a in range(*cz) {
+                for b in range(*cx) {
+                    wanted.insert((a * 4, b * 4));
                 }
-            };
-            for t in &tiles {
-                // tuile entièrement hors du rayon
-                let (tx, tz) = (t.y as f32 * 64.0 + 32.0 - cx, t.x as f32 * 64.0 + 32.0 - cz);
-                if (tx * tx + tz * tz).sqrt() > r + 46.0 {
+            }
+        }
+        self.chunks.retain(|k, _| wanted.contains(k));
+        let missing: Vec<(i32, i32)> = wanted.iter().copied().filter(|k| !self.chunks.contains_key(k)).collect();
+        let read: Vec<((i32, i32), Vec<Plant>)> = missing.par_iter().map(|&(a, b)| ((a, b), self.read_chunk(game, a, b))).collect();
+        self.chunks.extend(read.into_iter().map(|(k, v)| (k, Arc::new(v))));
+
+        let r2 = r * r;
+        let origin = Vec3::new(self.center[0], self.ground, self.center[1]);
+        let mut out = Vec::new();
+        for plants in self.chunks.values() {
+            for p in plants.iter() {
+                let [x, y, z] = p.pos;
+                if !centers.iter().any(|c| (x - c[0]).powi(2) + (z - c[1]).powi(2) <= r2) {
                     continue;
                 }
-                for te in &t.ecos {
-                    let Some(eco) = zone.ecos.iter().find(|e| e.index == te.eco) else { continue };
-                    for (li, plants) in te.layers.iter().enumerate() {
-                        let Some(layer) = eco.flora.get(li) else { continue };
-                        let Some(model) = model_of(&layer.flora) else { continue };
-                        for p in plants {
-                            let Some([x, y, z]) = t.place(p) else { continue };
-                            let (dx, dz) = (x - cx, z - cz);
-                            if dx * dx + dz * dz > r * r {
-                                continue;
-                            }
-                            // tirage stable : cap et taille d'après la valeur de la plante
-                            let h = p.packed.wrapping_mul(0x9E37_79B9) ^ (p.packed >> 15);
-                            let yaw = (h & 0xffff) as f32 / 65536.0 * std::f32::consts::TAU;
-                            let k = ((h >> 16) & 0xffff) as f32 / 65536.0;
-                            let s = layer.min_scale + (layer.max_scale - layer.min_scale).max(0.0) * k;
-                            let m = Mat4::from_scale_rotation_translation(
-                                Vec3::splat(s.max(0.05)),
-                                glam::Quat::from_rotation_y(yaw),
-                                Vec3::new(x, y, z),
-                            );
-                            // teinte : octets B, V, R, A (comme une couleur Direct3D)
-                            let [b, g, r, _] = p.tint;
-                            let tint = [r, g, b].map(|c| crate::sky::srgb_to_linear(c as f32));
-                            out.push((model.clone(), to_studio * m, false, Some(tint)));
-                        }
+                let matrix = Mat4::from_scale_rotation_translation(
+                    Vec3::splat(p.scale),
+                    glam::Quat::from_rotation_y(p.yaw),
+                    Vec3::new(x, y, z) - origin,
+                );
+                let asset = self.models[p.model as usize].clone();
+                out.push(DecorInstance { asset, matrix, cast_shadow: false, tint: Some(p.tint) });
+            }
+        }
+        self.centers = centers;
+        eprintln!(
+            "flore du sol : {} plantes autour de {} caméra(s), {} chunks lus ({:.0} ms)",
+            out.len(),
+            eyes.len(),
+            missing.len(),
+            t.elapsed().as_secs_f32() * 1000.0
+        );
+        Some(out)
+    }
+
+    /// Plantes d'un chunk `.cnk0` (vide s'il manque ou est illisible).
+    fn read_chunk(&self, game: &GameData, a: i32, b: i32) -> Vec<Plant> {
+        let mut out = Vec::new();
+        let name = format!("{}_{a}_{b}.cnk0", self.zone);
+        let tiles = match game.read(&name).and_then(|d| forgelight::flora::parse_cnk0(&d)) {
+            Ok(t) => t,
+            Err(e) => {
+                if !e.to_string().contains("introuvable") {
+                    eprintln!("flore du sol : {name} : {e:#}");
+                }
+                return out;
+            }
+        };
+        for t in &tiles {
+            for te in &t.ecos {
+                for (li, plants) in te.layers.iter().enumerate() {
+                    let Some(&(model, min_scale, max_scale)) = self.layers.get(&(te.eco, li)) else { continue };
+                    for p in plants {
+                        let Some(pos) = t.place(p) else { continue };
+                        // tirage stable : cap et taille d'après la valeur de la plante
+                        let h = p.packed.wrapping_mul(0x9E37_79B9) ^ (p.packed >> 15);
+                        let yaw = (h & 0xffff) as f32 / 65536.0 * std::f32::consts::TAU;
+                        let k = ((h >> 16) & 0xffff) as f32 / 65536.0;
+                        let scale = (min_scale + (max_scale - min_scale).max(0.0) * k).max(0.05);
+                        // teinte : octets B, V, R, A (comme une couleur Direct3D)
+                        let [b, g, r, _] = p.tint;
+                        let tint = [r, g, b].map(|c| crate::sky::srgb_to_linear(c as f32));
+                        out.push(Plant { pos, yaw, scale, model, tint });
                     }
                 }
             }
-            out.into_iter()
-        })
-        .collect()
+        }
+        out
+    }
 }
 
 /// Ciel de la carte à l'heure réglée (`None`, avec un message, s'il est illisible).

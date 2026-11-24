@@ -370,6 +370,13 @@ fn main() -> Result<()> {
             for e in &z.ecos {
                 println!("  éco {:>2} {:<24} {} / {} ×{} ({})", e.index, e.name, e.color_nx, e.spec_blend_ny, e.detail_repeat, e.physics);
             }
+            for f in &z.floras {
+                let ok = match gd.load_model(&f.model) {
+                    Ok(m) => format!("{} maillages", m.meshes.len()),
+                    Err(e) => format!("ERREUR {e:#}"),
+                };
+                println!("  flore {:<20} {:<40} {:<40} {} {:?} : {ok}", f.name, f.model, f.texture, f.flag, f.unknown);
+            }
             let filter = args.get(3).map(|s| s.to_ascii_lowercase()).unwrap_or_default();
             // « @X,Z,R » : acteurs ayant une instance à moins de R m du point (X, Z)
             let near: Option<Vec<f32>> = filter.strip_prefix('@').map(|p| p.split(',').filter_map(|v| v.parse().ok()).collect());
