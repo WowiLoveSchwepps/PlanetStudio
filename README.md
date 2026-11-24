@@ -8,6 +8,36 @@ de PlanetSide 2 (moteur Forgelight). Il n'y a rien à extraire à la main : le l
 
 ![Soldat TR au repos](docs/soldat_repos.png) ![Soldat TR posé](docs/soldat_pose.png)
 
+## Table des matières
+
+- [Compiler et lancer](#compiler-et-lancer)
+- [Installer PlanetSide 2 (version 2019)](#installer-planetside-2-version-2019)
+- [Mises à jour](#mises-à-jour)
+- [Fonctionnalités](#fonctionnalités)
+  - Assets et personnages : [navigateur d'assets](#navigateur-dassets),
+    [objets de base](#objets-de-base), [créer un soldat](#creer-un-soldat),
+    [liens entre acteurs](#liens-entre-acteurs), [camouflages](#camouflages),
+    [décalcomanies](#decalcomanies)
+  - Pose et animation : [pose](#pose), [déplacer un personnage](#deplacer-un-personnage),
+    [copier-coller de pose](#copier-coller-de-pose), [grille au sol](#grille-au-sol),
+    [timeline](#timeline), [animations du jeu](#animations-du-jeu),
+    [mélange d'animations](#melange-danimations), [animations FBX (Mixamo)](#animations-fbx),
+    [danses de groupe](#danses-de-groupe)
+  - Caméras et image : [deux caméras](#deux-cameras), [caméra prédéfinie](#camera-predefinie),
+    [photo](#photo), [post-traitement](#post-traitement), [fenêtre Exporter](#fenetre-exporter)
+  - Rendu et lumière : [matériaux du jeu](#materiaux-du-jeu),
+    [qualité graphique](#qualite-graphique), [soleil](#soleil), [ombres](#ombres),
+    [ambiances](#ambiances)
+  - Cartes : [décor des cartes](#decor-des-cartes) (terrain, flore, eau, ciel, brouillard, lampes,
+    particules)
+  - Projets : [annuler / rétablir, sauvegarde](#annuler-retablir)
+  - [Contrôles](#contrôles)
+- [Outils en ligne de commande](#outils-en-ligne-de-commande)
+- [Architecture](#architecture)
+  - [Formats décodés](#formats-décodés)
+- [Limites actuelles et pistes](#limites-actuelles-et-pistes)
+- [Licence](#licence)
+
 ## Compiler et lancer
 
 ```bash
@@ -60,9 +90,9 @@ son empreinte.
 
 ## Fonctionnalités
 
-- **Navigateur d'assets** : environ 7 600 acteurs (`.adr`) et 12 700 modèles (`.dme`), avec recherche et
+- <a id="navigateur-dassets"></a>**Navigateur d'assets** : environ 7 600 acteurs (`.adr`) et 12 700 modèles (`.dme`), avec recherche et
   catégories (personnages, armes, véhicules, objets de base, décor).
-- **Objets de base** (catégorie du navigateur, avec un filtre TR / NC / VS / neutres) : environ
+- <a id="objets-de-base"></a>**Objets de base** (catégorie du navigateur, avec un filtre TR / NC / VS / neutres) : environ
   570 terminaux (équipement, véhicules, avions, warpgate), boucliers et portes IFF, tubes de
   réapparition, générateurs, points de capture, tubes de gravité… Le jeu ne les place pas dans
   les cartes : c'est le serveur qui les fait apparaître, et le décor chargé d'une carte ne les
@@ -82,7 +112,7 @@ son empreinte.
     modèle : ils ne sont pas disponibles.
 
   ![Boucliers TR, NC et VS](docs/boucliers_factions.png)
-- **Créer un soldat** : choisissez la faction (TR, NC, VS ou NSO), le sexe, la classe et le visage. Le
+- <a id="creer-un-soldat"></a>**Créer un soldat** : choisissez la faction (TR, NC, VS ou NSO), le sexe, la classe et le visage. Le
   logiciel assemble l'armure, la tête et le casque, et fusionne leurs squelettes.
   Comme dans le jeu, un casque intégral (`<CoveredSlots name="CustomizationHead"/>` dans son
   `.adr`, ex. la cagoule de l'infiltré TR) masque la tête du même personnage ; la tête réapparaît
@@ -121,7 +151,7 @@ son empreinte.
     La section apparaît pour tout acteur dont le corps est une tenue de base de soldat
     (`Armor_<faction>_<sexe>_<classe>_Base`, `…_StealthBase`, robot `Armor_Common_Male_Skins_Base`)
     ou un corps de MAX (`Armor_<faction>_Male_Max_Look001`, `Armor_Common_Male_MAX_Base`).
-- **Liens entre acteurs** :
+- <a id="liens-entre-acteurs"></a>**Liens entre acteurs** :
   - *Fusion d'os* (comme le bonemerge de Source) : tête, casque ou pièces d'armure suivent le squelette
     de l'acteur parent.
     Chaque os de même nom reprend la déformation de celui du parent (matrice monde × liaison
@@ -129,30 +159,30 @@ son empreinte.
     `Look005Upgrade*`…) viennent d'un squelette aux orientations de liaison différentes, et
     sortaient tournées de 90° devant le visage.
   - *Attache à un os* : par exemple une arme sur `R_WEAPON`.
-- **Pose** : un gizmo de rotation (anneaux par axe local, plus un anneau de rotation libre) et un gizmo
+- <a id="pose"></a>**Pose** : un gizmo de rotation (anneaux par axe local, plus un anneau de rotation libre) et un gizmo
   de translation. L'inspecteur permet aussi de taper les angles. On sélectionne un os en cliquant sur une
   articulation ou dans l'arbre des os.
-- **Déplacer un personnage à la souris** : clic gauche tenu sur son corps, puis glisser. Il glisse
+- <a id="deplacer-un-personnage"></a>**Déplacer un personnage à la souris** : clic gauche tenu sur son corps, puis glisser. Il glisse
   sur le sol en restant sous le curseur, même si un os était sélectionné (`Ctrl` : aimanté aux
   carreaux de la grille, dans son orientation). Un clic simple sélectionne toujours une articulation.
-- **Copier-coller de pose** : `Ctrl+C` copie la pose du personnage sélectionné, `Ctrl+V` la colle sur
+- <a id="copier-coller-de-pose"></a>**Copier-coller de pose** : `Ctrl+C` copie la pose du personnage sélectionné, `Ctrl+V` la colle sur
   un autre personnage à l'image courante (`Ctrl+Maj+V` : en miroir gauche / droite). Les mêmes
   commandes sont dans le menu Édition, dans l'inspecteur et au clic droit sur un personnage de la
   liste Scène. « Coller l'animation » recopie toutes les clés des os, pas seulement l'image
   courante. « Coller la position » place le personnage à l'endroit et dans l'orientation de celui
   qui a été copié (sans toucher à sa pose ni à son échelle). Entre un homme, une femme ou un robot, la pose garde les longueurs d'os du personnage
   qui la reçoit.
-- **Grille au sol orientable** : Affichage > Grille > Rotation (glisser, taper un angle, pas de
+- <a id="grille-au-sol"></a>**Grille au sol orientable** : Affichage > Grille > Rotation (glisser, taper un angle, pas de
   15°), ou « Aligner sur le personnage sélectionné ». « Placer sous le personnage sélectionné »
   (touche G) pose la grille à ses pieds, sur un toit ou un étage ; à l'inverse, « Poser le
   personnage au centre de la grille » amène ses pieds au centre de la grille (clé à l'image
   courante, sans changer son orientation) ; « Hauteur » l'ajuste et
   « Origine » la ramène en (0, 0, 0). Angle et position sont enregistrés avec le projet.
-- **Timeline à images clés** : chaque modification pose une clé à l'image courante. Trois
+- <a id="timeline"></a>**Timeline à images clés** : chaque modification pose une clé à l'image courante. Trois
   interpolations sont proposées (lissée, linéaire, palier). Les clés se déplacent par glisser et se
   suppriment par clic droit. On peut aussi poser une clé sur toute la pose, lire en boucle et changer
   le nombre d'images par seconde.
-- **Animations du jeu** (onglet « 🏃 Animations du jeu ») : environ 1 300 clips de `ThirdPerson.mrn`
+- <a id="animations-du-jeu"></a>**Animations du jeu** (onglet « 🏃 Animations du jeu ») : environ 1 300 clips de `ThirdPerson.mrn`
   (courses, tir, recharges, morts, véhicules, emotes…), avec recherche et filtre par catégorie.
   Un clic prévisualise le clip en boucle sur le personnage sélectionné. Le bouton « Écrire dans la
   timeline » le convertit en clés, avec un réglage de vitesse et de répétitions. On peut aussi ne
@@ -160,7 +190,7 @@ son empreinte.
   Avec « Déplacement », la trajectoire du clip est appliquée à la position de l'acteur :
   une course avance réellement (environ 4 m/s), un virage tourne, et les répétitions
   s'enchaînent bout à bout.
-- **Mélange d'animations** (section « Mélange » de l'onglet Animations) :
+- <a id="melange-danimations"></a>**Mélange d'animations** (section « Mélange » de l'onglet Animations) :
   - *Remplacer* : le clip remplace l'animation existante, selon un poids réglable de 0 à 1 et avec
     des fondus d'entrée et de sortie exprimés en images ;
   - *Superposer* : le clip s'ajoute par-dessus l'animation déjà présente. C'est le mode des clips
@@ -170,7 +200,7 @@ son empreinte.
 
   Le mode et la partie du corps sont choisis automatiquement d'après le nom du clip
   (`_Additive`, `_PartialUpper`).
-- **Animations FBX (Mixamo)** (onglet Animations, section « 🎞 Animations FBX ») : on importe une
+- <a id="animations-fbx"></a>**Animations FBX (Mixamo)** (onglet Animations, section « 🎞 Animations FBX ») : on importe une
   animation de [Mixamo](https://www.mixamo.com) et elle est transférée sur le squelette du soldat.
   À l'export Mixamo, choisissez le format *FBX Binary* et *Without Skin* (la cadence 30 ou 60 i/s
   n'a pas d'importance). Un export *With Skin* marche aussi : le maillage est ignoré, et des deux
@@ -187,7 +217,7 @@ son empreinte.
     main ou du pied. Les FBX texte (ASCII) ne sont pas lus.
 
   ![Danse Mixamo transférée sur un soldat TR](docs/anim_fbx_mixamo.png)
-- **Danses de groupe** (en haut de l'onglet Animations) : on choisit la danse dans la liste
+- <a id="danses-de-groupe"></a>**Danses de groupe** (en haut de l'onglet Animations) : on choisit la danse dans la liste
   « Danse », soit la danse du cheval, soit l'une des animations FBX importées.
   - La « danse du cheval » est calculée par cinématique inverse. On place les pieds et les mains,
     et le squelette suit. Elle contient le rebond sur chaque temps, des appuis alternés, des poings
@@ -199,7 +229,7 @@ son empreinte.
     scène danse en même temps.
   - « Créer une troupe » : de 2 à 24 soldats aux factions mélangées (TR, NC, VS, NSO), avec classes,
     sexes et visages variés, placés en formation en V et qui dansent dès leur chargement.
-- **Deux caméras**, comme dans Source Filmmaker :
+- <a id="deux-cameras"></a>**Deux caméras**, comme dans Source Filmmaker :
   - la *caméra de travail* 🛠 : libre, pour poser et régler la scène, jamais rendue ;
   - la *caméra de prise* 🎥 : celle qui fait la photo et la vidéo. Elle existe toujours (fixe) et
     devient animée dès qu'on lui pose une clé.
@@ -210,7 +240,7 @@ son empreinte.
   (le hors-champ est assombri). En vue de travail, la caméra de prise est dessinée (pyramide cyan)
   et un moniteur en haut à droite montre ce qu'elle filme ; un clic dessus y fait passer.
   « 📷 Placer la prise ici » met la caméra de prise à la place de la vue de travail.
-- **Caméra prédéfinie** (bouton « 🎞 Caméra prédéfinie » en haut de la vue) : une fenêtre en
+- <a id="camera-predefinie"></a>**Caméra prédéfinie** (bouton « 🎞 Caméra prédéfinie » en haut de la vue) : une fenêtre en
   trois étapes pour créer un mouvement de caméra tout prêt autour d'un personnage.
   1. *Personnage filmé* : le personnage sélectionné (ou le seul de la scène ; une tête, un casque
      ou une arme renvoient au corps qui les porte).
@@ -237,13 +267,13 @@ son empreinte.
   l'aperçu (une clé tous les 10° au plus, la spline reste sur le cercle) et passe en vue
   Prise : Espace pour voir le mouvement. Les clés restent modifiables ; Ctrl+Z annule.
   « 🗑 Effacer toutes les clés de caméra », en bas de la fenêtre, rend la caméra de prise fixe.
-- **Photo** (P, ou Fichier > Prendre une photo) : l'image courante vue par la caméra de prise, avec
+- <a id="photo"></a>**Photo** (P, ou Fichier > Prendre une photo) : l'image courante vue par la caméra de prise, avec
   les réglages de l'onglet Image de la fenêtre Exporter (format, nom, taille), jusqu'à
   15360×8640. Les grandes images sont rendues par tuiles : une
   4K suréchantillonnée 3× ou 4×, ou une 8K, ne dépasse plus la mémoire de la carte graphique.
   L'image entière est d'abord rendue en réduit : l'occlusion ambiante y retrouve ce qui est hors
   de la tuile, sans quoi chaque bord de tuile s'éclaircirait d'un coup près d'un personnage.
-- **Post-traitement** (Affichage > 🎨 Post-traitement…, enregistré dans le projet ; la vue, les
+- <a id="post-traitement"></a>**Post-traitement** (Affichage > 🎨 Post-traitement…, enregistré dans le projet ; la vue, les
   photos et les vidéos l'utilisent) :
   - étalonnage : exposition, rendu des tons (écrêtage d'origine, filmique doux qui n'adoucit que
     les hautes lumières, ACES contrasté, AgX), contraste, saturation, température et teinte ;
@@ -264,7 +294,7 @@ son empreinte.
     le ciel, le brouillard et le voile de la carte, et l'ambiance Indar.
 
     ![Indar : studio avant, studio « Jeu (live) », jeu](docs/comparaison_indar_live.jpg)
-- **Matériaux du jeu** : en plus de la couleur (`_C`), le rendu utilise les cartes du jeu :
+- <a id="materiaux-du-jeu"></a>**Matériaux du jeu** : en plus de la couleur (`_C`), le rendu utilise les cartes du jeu :
   - `_N`, le relief (normal map) : coutures, plaques, rivets ;
   - `_S`, la brillance : métal, brillance et occlusion des reflets ;
   - le canal B de `_S`, les zones lumineuses : LED, emblèmes et voyants des armes.
@@ -275,7 +305,7 @@ son empreinte.
 
   Le relief et les lumières se coupent dans la fenêtre Qualité graphique (et en capture avec
   `--no-relief` et `--no-emissive` ; `--emissive 1.5` règle leur intensité).
-- **Qualité graphique** (Affichage > ⚙ Qualité graphique…), dans l'esprit des options du jeu :
+- <a id="qualite-graphique"></a>**Qualité graphique** (Affichage > ⚙ Qualité graphique…), dans l'esprit des options du jeu :
   - **anticrénelage** : MSAA (désactivé, 2×, 4× ou 8× selon la carte graphique), **FXAA** sur
     l'image finale (en plus du MSAA, ou à sa place) et **reflets lissés** (les reflets du soleil
     ne scintillent plus sur le relief fin, les courbures et l'eau lointaine) ;
@@ -305,7 +335,7 @@ son empreinte.
   décocher pour garder celle de la vue), avec un suréchantillonnage réglable : l'image est
   rendue 2× (par défaut), 3× ou 4× plus grande, puis réduite. Ces réglages sont des préférences de la machine,
   enregistrées avec la configuration du studio, pas dans le projet.
-- **Camouflages** (inspecteur de l'acteur, section Camouflage) : aucun (couleurs d'origine), le
+- <a id="camouflages"></a>**Camouflages** (inspecteur de l'acteur, section Camouflage) : aucun (couleurs d'origine), le
   camouflage par défaut de l'armure (TR : Digital, NC : African Forest, VS : Forest Greyscale) ou
   l'un des quelque 160 motifs du jeu, avec un filtre de recherche. L'échelle du motif et son
   intensité se règlent. Le choix s'applique aussi aux acteurs fusionnés (tête, casque) et peut
@@ -314,11 +344,11 @@ son empreinte.
   d'infiltrateur TR, VS et NSO ne prennent pas de camouflage : leur emplacement ne contient que
   `norm.dds` (texture de remplissage), et le masque de leur `_N` ne suit pas les pièces de la
   tenue (le motif y tombait en taches découpées au hasard). Celle du NC a le sien (AfricanForest).
-- **Décalcomanies** (inspecteur de l'acteur, section Décalcomanie) : aucune, celle de l'armure
+- <a id="decalcomanies"></a>**Décalcomanies** (inspecteur de l'acteur, section Décalcomanie) : aucune, celle de l'armure
   (TR et NC : PowerHouse, NSO : logo NS) ou l'une des quelque 200 décalcomanies du jeu
   (`Decal_*`), avec filtre et opacité. Elle se pose sur les épaulières, comme dans le jeu, par-dessus
   le camouflage. Même propagation et même enregistrement que le camouflage.
-- **Soleil** (menu Affichage) : azimut, hauteur au-dessus de l'horizon, couleur et intensité,
+- <a id="soleil"></a>**Soleil** (menu Affichage) : azimut, hauteur au-dessus de l'horizon, couleur et intensité,
   avec cinq préréglages (Studio, Midi, Matin, Coucher, Nuit). Un disque à rayons montre sa
   direction dans la vue de travail (désactivable) ; il n'apparaît ni dans la vue de prise ni dans
   les exports. Les réglages sont enregistrés dans le projet ; « Studio » est la lumière d'origine.
@@ -329,7 +359,7 @@ son empreinte.
   dernière clé supprimée, le soleil reste fixe là où elle le mettait. Entre deux clés, l'azimut
   tourne par le plus court chemin ; l'interpolation suit le choix de la timeline (lissée,
   linéaire, palier). Annuler / rétablir couvre les clés de soleil.
-- **Ombres** (menu Affichage) : le soleil projette l'ombre des personnages sur eux-mêmes, entre
+- <a id="ombres"></a>**Ombres** (menu Affichage) : le soleil projette l'ombre des personnages sur eux-mêmes, entre
   eux et sur le sol. Le sol est invisible et ne montre que l'ombre, dont l'opacité se règle
   (« Ombre au sol »). Dans un décor, cette opacité assombrit aussi le sol du décor sous l'ombre
   des personnages (et pas seulement la lumière directe du soleil), là où le soleil arrive.
@@ -338,7 +368,7 @@ son empreinte.
   soleil. Décocher « Le décor ombre les personnages » les garde éclairés par le soleil (éclairage
   de cinéma) ; le sol et le décor restent ombrés. Ces réglages sont enregistrés dans le projet ;
   photos et vidéos en tiennent compte.
-- **Ambiances** (menu Affichage > Ambiance) : l'éclairage d'ambiance et les reflets viennent d'un
+- <a id="ambiances"></a>**Ambiances** (menu Affichage > Ambiance) : l'éclairage d'ambiance et les reflets viennent d'un
   panorama du jeu au lieu du dôme gris du studio. Au choix : Indar (canyons), Indar (savane),
   Amerish, Esamir, Nexus, le dôme ciel bleu ou l'ambiance extérieure par défaut. Indar n'a pas
   de `indar_ambient_c.dds` : ses panoramas s'appellent `indar_canyons_c.dds` (celui que cite
@@ -351,7 +381,7 @@ son empreinte.
   Orientation, intensité et fond s'animent comme le soleil : « 🔑 Clé d'ambiance » dans le menu,
   puis tout réglage pose une clé à l'image courante. Les clés apparaissent sur la piste
   « 🌄 Ambiance » de la timeline (glisser, clic droit). Le choix du panorama, lui, ne s'anime pas.
-- **Décor des cartes** (menu Décor > « 🗺 Choisir une carte et un lieu… ») : les bâtiments, props,
+- <a id="decor-des-cartes"></a>**Décor des cartes** (menu Décor > « 🗺 Choisir une carte et un lieu… ») : les bâtiments, props,
   rochers et la végétation que le jeu place sur Indar, Amerish, Esamir, Hossin, la VR, le tutoriel
   et `quickload`.
   - La vue d'ensemble de la carte est assemblée à partir des tuiles du terrain ; les objets y sont
@@ -467,8 +497,8 @@ son empreinte.
   ![La Couronne, Indar](docs/decor_crown.png) ![Dans une base d'Indar](docs/decor_base.png)
   ![Hossin jusqu'à l'horizon](docs/decor_hossin.png) ![Vue d'ensemble d'Indar](docs/carte_indar.png)
 - **Poses** : copier, coller et coller en miroir (gauche ↔ droite).
-- **Annuler / rétablir**, et projets sauvegardés en `.psproj` (JSON) dans `Documents/PlanetStudio`.
-- **Fenêtre Exporter** (bouton 🎬 Exporter de la vue, ou Fichier > Exporter), dans l'esprit
+- <a id="annuler-retablir"></a>**Annuler / rétablir**, et projets sauvegardés en `.psproj` (JSON) dans `Documents/PlanetStudio`.
+- <a id="fenetre-exporter"></a>**Fenêtre Exporter** (bouton 🎬 Exporter de la vue, ou Fichier > Exporter), dans l'esprit
   d'Adobe Media Encoder : réglages à gauche, aperçu de la caméra de prise à droite (post-traitement
   compris), barre de temps et transport (début, image précédente, lecture / pause, image suivante,
   fin), résumé du fichier et bouton d'export en bas. Les réglages sont gardés d'une session à l'autre.

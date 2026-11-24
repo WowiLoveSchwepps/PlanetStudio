@@ -8,6 +8,16 @@ game's `.pack2` archives.
 
 ![TR soldier at rest](docs/soldat_repos.png) ![Posed TR soldier](docs/soldat_pose.png)
 
+## Table of contents
+
+- [Language](#language)
+- [Build and run](#build-and-run)
+- [Installing PlanetSide 2 (2019 version)](#installing-planetside-2-2019-version)
+- [Updates](#updates)
+- [Features](#features)
+  - [Controls](#controls)
+- [License](#license)
+
 ## Language
 
 The interface is available in English and French. On first launch, PlanetStudio follows the
