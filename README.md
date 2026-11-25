@@ -888,6 +888,10 @@ crates/studio       l'éditeur (eframe/egui + wgpu)
     d'aube, de midi, de coucher et de nuit. Lues en trilinéaire sur l'image encodée sRGB.
 
   Le bloom, l'occlusion et les reflets de l'objectif (`<Lens>`) de cette section ne sont pas lus.
+  La saleté de l'objectif de `<Lens>` (`DirtLayer1`, `DirtLayer2`, `DirtNoise` : disques flous
+  et granuleux, éclairés par le bloom) est reproduite par le réglage « Saleté de l'objectif »
+  du post-traitement, avec les valeurs d'Indar (les mêmes sur tous les continents, à l'intensité
+  près), sans lire le fichier.
   `<Dome>` donne aussi, par clé, une correction d'exposition du dôme (`EvComp`) : −2 IL à 7 h,
   +1,2 IL à 13 h, +2 IL à 21 h sur Indar. Le studio l'interpole entre les clés et l'applique au
   dôme, à son horizon (brouillard, voile) et à ses reflets, relativement à 0,9 IL (ciel de midi

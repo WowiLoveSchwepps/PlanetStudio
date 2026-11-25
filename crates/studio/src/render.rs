@@ -4064,6 +4064,7 @@ impl Renderer {
         self.post_settings.fx.dof = false;
         self.post_settings.fx.grain = 0.0;
         self.post_settings.fx.vignette = 0.0;
+        self.post_settings.fx.lens_dirt = 0.0;
         self.post_settings.frame = None;
         self.post_settings.ao_guide = None;
         self.render(t.as_ref(), view_proj, eye, std::slice::from_ref(item), &Lines::default());
@@ -4609,6 +4610,7 @@ impl Renderer {
             let keep = self.post_settings;
             self.post_settings.ao = 0.0;
             self.post_settings.bloom = 0.0;
+            self.post_settings.fx.lens_dirt = 0.0;
             self.post_settings.fx.dof = false;
             self.render(Some(&g), view_proj, eye, items, lines);
             self.post_settings = keep;

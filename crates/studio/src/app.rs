@@ -6113,6 +6113,22 @@ pub(super) fn post_fx_controls(ui: &mut egui::Ui, fx: &mut crate::post::PostFx) 
         ui.label("Grain");
         ui.add(egui::Slider::new(&mut fx.grain, 0.0..=1.0)).on_hover_text(tr!("Grain de pellicule, un par pixel de l'image exportée", "Film grain, one per pixel of the exported image"));
         ui.end_row();
+        ui.label(tr!("Saleté de l'objectif", "Lens dirt"));
+        ui.add(egui::Slider::new(&mut fx.lens_dirt, 0.0..=1.0)).on_hover_text(tr!(
+            "Cercles flous et granuleux sur l'objectif, comme dans le jeu : invisibles dans l'ombre, ils \
+             apparaissent autour des lumières fortes (soleil, néons, reflets) grâce au bloom",
+            "Blurry, grainy circles on the lens, like in the game: invisible in shadow, they appear \
+             around strong lights (sun, neons, reflections) through the bloom"
+        ));
+        ui.end_row();
+        ui.label(tr!("Bombé de la visière", "Visor curvature"));
+        ui.add_enabled(fx.lens_dirt > 0.0, egui::Slider::new(&mut fx.lens_curve, 0.0..=1.0)).on_hover_text(tr!(
+            "La saleté est posée sur une visière de casque en bulle : vers les bords, vue de biais, \
+             les cercles s'aplatissent et accrochent davantage la lumière. 0 : objectif plat",
+            "The dirt sits on a bubble-shaped helmet visor: toward the edges, seen at an angle, the \
+             circles flatten and catch more light. 0: flat lens"
+        ));
+        ui.end_row();
         ui.label(tr!("Netteté", "Sharpness"));
         ui.add(egui::Slider::new(&mut fx.sharpen, 0.0..=1.0))
             .on_hover_text(tr!("Fait ressortir les détails fins ; dans les exports, appliquée après la réduction du suréchantillonnage", "Brings out fine details; in exports, applied after the supersampling downscale"));
