@@ -4,7 +4,7 @@
 //!   [--zoom facteur] [--aim mètres] [--light x,y,z] [--no-relief] [--no-emissive]
 //!   [--quality apercu|equilibre|final] [--msaa 1|2|4|8] [--fxaa] [--no-specular-aa]
 //!   [--look neutre|cinema] [--exposure IL] [--tonemap aucun|doux|aces|agx] [--contrast f] [--saturation f]
-//!   [--temperature -1..1] [--vignette 0..1] [--grain 0..1] [--sharpen 0..1] [--dof auto|mètres]
+//!   [--temperature -1..1] [--vignette 0..1] [--grain 0..1] [--lens-dirt 0..1] [--lens-curve 0..1] [--sharpen 0..1] [--dof auto|mètres]
 //!   [--dof-blur %] [--texture-sharpness 0..1] [--no-bicubic]
 //!   [--flora-quality basse|haute] [--water-quality basse|haute] [--terrain-quality basse|moyenne|haute|ultra]
 //!   [--shadow-quality off|low|medium|high|ultra]
@@ -177,6 +177,8 @@ pub fn run(args: &[String]) -> Result<()> {
             "--no-game-grading" => fx.game_grading = false,
             "--vignette" => fx.vignette = it.next().context("--vignette 0..1")?.parse()?,
             "--grain" => fx.grain = it.next().context("--grain 0..1")?.parse()?,
+            "--lens-dirt" => fx.lens_dirt = it.next().context("--lens-dirt 0..1")?.parse()?,
+            "--lens-curve" => fx.lens_curve = it.next().context("--lens-curve 0..1")?.parse()?,
             "--sharpen" => fx.sharpen = it.next().context("--sharpen 0..1")?.parse()?,
             "--dof" => {
                 // distance de mise au point, ou « auto » (la cible de la caméra)

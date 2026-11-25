@@ -28,6 +28,12 @@ pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const AO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// au plus 6 niveaux de bloom (de 1/2 à 1/64)
 const BLOOM_LEVELS: usize = 6;
+/// Niveau de bloom qui éclaire la saleté de l'objectif : le 1/16 (ou le plus petit), qui contient
+/// aussi les niveaux plus petits après la remontée. Un halo large : une lumière forte fait
+/// apparaître les cercles sur une bonne part de l'image, pas seulement autour d'elle.
+fn dirt_level(levels: usize) -> usize {
+    levels.saturating_sub(1).min(3)
+}
 /// échantillons de la profondeur de champ par pixel
 const DOF_SAMPLES: f32 = 48.0;
 /// taille d'une table d'étalonnage du jeu : 16 tranches de 16 × 16 côte à côte
@@ -83,6 +89,9 @@ struct PostU {
     guide: vec4<f32>,
     // étalonnage du jeu : x actif, y part de la seconde table, z point blanc, w tables présentes
     game: vec4<f32>,
+    // saleté de l'objectif : x force, y normalisation du bloom (somme des niveaux ramenée à 1),
+    // z celle du niveau large qui l'éclaire, w bombé de la visière
+    lens: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> pu: PostU;
 "#;
@@ -450,6 +459,8 @@ const COMPOSITE_SHADER: &str = r#"
 @group(0) @binding(4) var s_lin: sampler;
 // tables d'étalonnage du jeu (`colorkey`) : deux tables de 256 × 16 l'une sous l'autre
 @group(0) @binding(5) var t_lut: texture_2d<f32>;
+// niveau large du bloom (1/16), qui éclaire la saleté de l'objectif
+@group(0) @binding(6) var t_dirt_light: texture_2d<f32>;
 
 fn to_srgb(c: vec3<f32>) -> vec3<f32> {
     let c1 = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
@@ -516,6 +527,75 @@ fn pcg(v: u32) -> u32 {
 fn rnd(x: u32, y: u32, seed: u32) -> f32 {
     return f32(pcg(x ^ pcg(y ^ pcg(seed)))) / 4294967295.0;
 }
+// éclat de la saleté de l'objectif à pleine force
+const DIRT_GAIN: f32 = 10.0;
+
+fn rnd_cell(c: vec2<f32>, seed: u32) -> f32 {
+    return rnd(bitcast<u32>(i32(c.x)), bitcast<u32>(i32(c.y)), seed);
+}
+
+// Saleté de l'objectif, comme la section `<Lens>` des ciels du jeu : deux couches de disques
+// de taille et d'intensité aléatoires (`DirtLayer1`, `DirtLayer2`), rendues granuleuses par un
+// bruit (`DirtNoise`). Elle n'est visible que là où le bloom l'éclaire (`<Dirt BloomStr>`) :
+// une lumière forte dans le champ fait apparaître les cercles. `p` : position dans l'image
+// entière, sa hauteur valant 1 (mêmes cercles dans une tuile, un aperçu ou un export).
+
+// une couche : au plus un disque par case (`density` : probabilité), rayon au plus une case
+fn dirt_layer(p: vec2<f32>, cell: f32, rmin: f32, rmax: f32, smin: f32, smax: f32, density: f32, seed: u32) -> f32 {
+    let base = floor(p / cell);
+    var sum = 0.0;
+    for (var j = -1; j <= 1; j++) {
+        for (var i = -1; i <= 1; i++) {
+            let c = base + vec2<f32>(f32(i), f32(j));
+            if (rnd_cell(c, seed) > density) { continue; }
+            let centre = (c + vec2<f32>(rnd_cell(c, seed + 1u), rnd_cell(c, seed + 2u))) * cell;
+            let r = mix(rmin, rmax, rnd_cell(c, seed + 3u));
+            let d = length(p - centre) / r;
+            // disque à bord doux, un peu plus clair sur son pourtour (comme un bokeh)
+            let disc = (1.0 - smoothstep(0.8, 1.0, d)) * (0.7 + 0.3 * smoothstep(0.3, 0.92, d));
+            sum += mix(smin, smax, rnd_cell(c, seed + 4u)) * disc;
+        }
+    }
+    return sum;
+}
+
+fn value_noise(p: vec2<f32>, seed: u32) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let a = rnd_cell(i, seed);
+    let b = rnd_cell(i + vec2<f32>(1.0, 0.0), seed);
+    let c = rnd_cell(i + vec2<f32>(0.0, 1.0), seed);
+    let d = rnd_cell(i + vec2<f32>(1.0, 1.0), seed);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+fn lens_dirt(p: vec2<f32>) -> f32 {
+    // grands cercles (`DirtLayer1` : tailles 1 à 3, forces 0,1 à 0,4), petits points
+    // (`DirtLayer2` : tailles 0,01 à 1, forces 0,07 à 0,2, densité 0,9)
+    let d = dirt_layer(p, 0.2, 0.025, 0.075, 0.1, 0.4, 1.0, 1013u)
+        + dirt_layer(p, 0.06, 0.003, 0.03, 0.07, 0.2, 0.9, 2027u);
+    // grain : taches fines et marbrure plus large
+    let n = value_noise(p * 180.0, 3041u) * 0.6 + value_noise(p * 24.0, 4057u) * 0.4;
+    return d * (0.45 + 1.1 * n);
+}
+
+// Visière de casque bombée : la saleté est posée sur une bulle (calotte sphérique de rayon R)
+// vue de l'intérieur, centrée sur l'image. Un point de l'écran à la distance r du centre
+// correspond sur la bulle à l'arc R·asin(r/R) : vers les bords, la surface est vue de biais, les
+// cercles s'y aplatissent dans le sens du rayon et accrochent davantage la lumière (incidence
+// rasante). `q` : position depuis le centre (hauteur de l'image = 1), `corner` : distance du
+// coin, `curve` : bombé (0 plat, 1 : les coins presque rasants). Rend la position sur la bulle
+// et le renfort de lumière.
+fn visor(q: vec2<f32>, corner: f32, curve: f32) -> vec3<f32> {
+    let r = length(q);
+    if (curve <= 0.0 || r < 1e-5) { return vec3<f32>(q, 1.0); }
+    // sinus de l'incidence dans les coins : 0,2 (presque plat) à 0,99 (rasant)
+    let big_r = corner / mix(0.2, 0.99, clamp(curve, 0.0, 1.0));
+    let s = min(r / big_r, 0.995);
+    let cos_i = sqrt(1.0 - s * s);
+    return vec3<f32>(q * (big_r * asin(s) / r), 1.0 + 1.5 * (1.0 - cos_i));
+}
 
 @fragment
 fn fs_composite(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
@@ -523,7 +603,16 @@ fn fs_composite(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
     var c = textureLoad(t_hdr, vec2<i32>(fc.xy), 0).rgb;
     // l'occlusion est déjà appliquée par la profondeur de champ
     if (pu.dof.x < 0.5) { c = occluded(c, uv); }
-    c = c + textureSampleLevel(t_bloom, s_lin, uv, 0.0).rgb * pu.params.z;
+    let bloom = textureSampleLevel(t_bloom, s_lin, uv, 0.0).rgb;
+    c = c + bloom * pu.params.z;
+    if (pu.lens.x > 0.0) {
+        let h = max(pu.frame.w, 1.0);
+        let q = (fc.xy + pu.frame.xy - pu.frame.zw * 0.5) / h;
+        let v = visor(q, length(pu.frame.zw * 0.5) / h, pu.lens.w);
+        // halo large surtout, plus un peu du proche (cercles plus vifs près de la lumière)
+        let light = textureSampleLevel(t_dirt_light, s_lin, uv, 0.0).rgb * pu.lens.z + bloom * pu.lens.y * 0.25;
+        c = c + light * lens_dirt(v.xy) * v.z * pu.lens.x * DIRT_GAIN;
+    }
 
     // étalonnage : exposition et balance des blancs en lumière linéaire, puis rendu des tons
     c = max(c * pu.grade.x * pu.grade2.rgb, vec3<f32>(0.0));
@@ -635,6 +724,10 @@ pub struct PostFx {
     pub grain: f32,
     /// netteté (0 à 1)
     pub sharpen: f32,
+    /// saleté de l'objectif (0 à 1) : cercles que les lumières fortes font apparaître
+    pub lens_dirt: f32,
+    /// bombé de la visière qui porte cette saleté (0 plat, 1 très bombé) : effet de casque
+    pub lens_curve: f32,
     /// profondeur de champ
     pub dof: bool,
     /// mise au point sur la cible de la caméra (sinon : `focus`)
@@ -658,6 +751,8 @@ impl Default for PostFx {
             vignette: 0.0,
             grain: 0.0,
             sharpen: 0.0,
+            lens_dirt: 0.0,
+            lens_curve: 0.9,
             dof: false,
             focus_auto: true,
             focus: 5.0,
@@ -789,6 +884,7 @@ struct PostUniform {
     full_inv: [[f32; 4]; 4],
     guide: [f32; 4],
     game: [f32; 4],
+    lens: [f32; 4],
 }
 
 /// Pipelines et dispositions du post-traitement (partagés par toutes les cibles).
@@ -921,9 +1017,10 @@ impl Post {
                 texture_entry(3, float, false),
                 sampler_entry(4),
                 texture_entry(5, float, false),
+                texture_entry(6, float, false),
             ],
         });
-        let lut = device.create_texture(&wgpu::TextureDescriptor {
+        let lut =device.create_texture(&wgpu::TextureDescriptor {
             label: Some("colorkey"),
             size: wgpu::Extent3d { width: LUT_W, height: LUT_H * 2, depth_or_array_layers: 1 },
             mip_level_count: 1,
@@ -1206,6 +1303,7 @@ impl PostTargets {
         let dof_bind = dof_bind_for(&hdr_view);
         let dof_smooth_bind = dof_bind_for(&dof_raw_view);
         let bloom_view = bloom.first().map(|b| &b.0).unwrap_or(&hdr_view);
+        let dirt_view = bloom.get(dirt_level(bloom.len())).map(|b| &b.0).unwrap_or(&hdr_view);
         let composite_bind = |src: &wgpu::TextureView| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("composite"),
@@ -1217,6 +1315,7 @@ impl PostTargets {
                     wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&ao_view) },
                     wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&post.sampler) },
                     wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&post.lut_view) },
+                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(dirt_view) },
                 ],
             })
         };
@@ -1296,7 +1395,11 @@ impl PostTargets {
         settings: &PostSettings,
     ) {
         let fx = &settings.fx;
-        let bloom_on = settings.bloom > 0.0 && !self.bloom.is_empty();
+        let dirt = fx.lens_dirt.clamp(0.0, 1.0);
+        // le bloom éclaire la saleté de l'objectif : il est calculé pour elle même s'il est coupé
+        let bloom_on = (settings.bloom > 0.0 || dirt > 0.0) && !self.bloom.is_empty();
+        // la remontée additionne tous les niveaux : on ramène la somme à un halo mesuré
+        let bloom_norm = if bloom_on { 2.0 / self.bloom.len() as f32 } else { 0.0 };
         let frame = settings.frame.unwrap_or([0.0, 0.0, self.width as f32, self.height as f32]);
         // flou à l'infini proportionnel à la hauteur de l'image entière, borné par la marge des tuiles
         let coc = (fx.blur.max(0.0) / 100.0 * frame[3]).min(settings.max_coc / 1.5);
@@ -1310,8 +1413,7 @@ impl PostTargets {
             params: [
                 settings.ao.clamp(0.0, 1.0),
                 settings.ao_radius.max(0.01),
-                // la remontée additionne tous les niveaux : on ramène la somme à un halo mesuré
-                if bloom_on { settings.bloom.max(0.0) * 2.0 / self.bloom.len() as f32 } else { 0.0 },
+                settings.bloom.max(0.0) * bloom_norm,
                 settings.bloom_threshold,
             ],
             size: [self.width as f32, self.height as f32, self.ao_size.0 as f32, self.ao_size.1 as f32],
@@ -1336,6 +1438,13 @@ impl PostTargets {
                 settings.lut_mix.clamp(0.0, 1.0),
                 settings.white_point.max(0.1),
                 if settings.luts { 1.0 } else { 0.0 },
+            ],
+            lens: [
+                if bloom_on { dirt } else { 0.0 },
+                bloom_norm,
+                // le niveau large additionne les niveaux de `dirt_level` au dernier
+                if bloom_on { 1.0 / (self.bloom.len() - dirt_level(self.bloom.len())) as f32 } else { 0.0 },
+                fx.lens_curve.clamp(0.0, 1.0),
             ],
         };
         queue.write_buffer(&post.uniform, 0, bytemuck::bytes_of(&u));
