@@ -16,6 +16,9 @@
 //! dépend que de son numéro et de l'instant. La lecture, le retour en arrière et l'export vidéo
 //! montrent donc exactement les mêmes flocons, sans état à garder. Les particules vivent dans une
 //! boîte autour de la caméra : celles qui en sortent reviennent par le côté opposé.
+//!
+//! S'y ajoutent les lueurs attachées à des objets (voir [`Glow`]) : les points de lumière qui
+//! flottent autour des bulbes des marais d'Hossin, d'après l'effet de leur `.adr`.
 
 use serde::{Deserialize, Serialize};
 
@@ -402,6 +405,109 @@ const BUTTERFLIES: [Layer; 1] = [Layer {
     glow: 6.0,
 }];
 
+// ---------------------------------------------------------------- lueurs des plantes
+
+/// Lueurs attachées à un objet du décor : l'effet composite de son `.adr` (`EffectList`).
+///
+/// Les bulbes des marais d'Hossin (`Hossin_Props_SwampBulbs02/03.adr`) jouent
+/// `EFX_PlantBulbs_1/2`, qui ne contient pas de lampe (le jeu n'éclaire pas le sol autour) mais
+/// l'effet de particules `Hossen_BulbPlant_1/2.xml` : de minuscules points de lumière (émetteur
+/// « Bubbles », `LitMode` 0 : ils luisent sans être éclairés) qui naissent sur un disque autour de
+/// la plante, tournent autour de l'axe vertical en montant lentement, et passent du blanc à
+/// l'orangé avant de s'éteindre. Le jeu en garde une dizaine en vie par plante (`Count`).
+/// Le studio y ajoute une petite lampe orangée ([`GlowLight`]) pour que les bulbes éclairent
+/// autour d'eux.
+/// Comme les particules d'ambiance, tout est calculé sur le GPU d'après le temps de la timeline.
+#[derive(Clone, Copy, Debug)]
+pub struct Glow {
+    /// effet composite du `.adr` qui le déclenche
+    pub effect: &'static str,
+    /// particules en vie par objet
+    pub count: u32,
+    /// rayon du disque d'apparition (m) et sa hauteur au-dessus de l'origine de l'objet
+    pub radius: f32,
+    pub height: f32,
+    /// durée de vie (s), min et max
+    pub life: [f32; 2],
+    /// vitesse de montée au départ (m/s, au plus) et accélération vers le haut (m/s²)
+    pub rise: [f32; 2],
+    /// orbite autour de l'axe vertical : rayon min et max (m), vitesse max (degrés/s)
+    pub orbit: [f32; 3],
+    /// côté du carré (m), min et max
+    pub size: [f32; 2],
+    /// taille au début, au milieu et à la fin de la vie (facteur)
+    pub scale: [f32; 3],
+    /// couleur (sRGB 0..1) et opacité au début, au milieu et à la fin de la vie
+    pub colors: [[f32; 4]; 3],
+    /// lumière propre (même échelle que [`Layer::glow`]) : `Brightness` de l'effet × 6/11
+    pub glow: f32,
+    /// distance au-delà de laquelle l'effet n'est plus dessiné (`VisibleDistance`, m)
+    pub distance: f32,
+    /// lampe qui éclaire autour de l'objet (le jeu n'en a pas : ajoutée pour le studio)
+    pub light: Option<GlowLight>,
+}
+
+/// Lumière ponctuelle d'un objet à lueur, comme les lampes placées du décor (même échelle
+/// d'intensité, voir [`crate::render::DecorLight`]).
+#[derive(Clone, Copy, Debug)]
+pub struct GlowLight {
+    /// couleur (sRGB 0..255)
+    pub color: [u8; 3],
+    /// intensité (0,12 à 0,25 : petit voyant, 1 : lampe d'arche)
+    pub intensity: f32,
+    /// portée (m, à l'échelle 1)
+    pub range: f32,
+    /// hauteur au-dessus de l'origine de l'objet (m) : celle des bulbes
+    pub height: f32,
+}
+
+/// lueur orangée des bulbes, au cœur des touffes
+const BULB_LIGHT: GlowLight = GlowLight { color: [255, 150, 50], intensity: 0.35, range: 6.0, height: 0.7 };
+
+/// teintes de `Hossen_BulbPlant_*.xml` (`ColorCurve` de l'émetteur « Bubbles »)
+const BULB_COLORS: [[f32; 4]; 3] = [[1.0, 1.0, 1.0, 0.45], [0.56, 0.39, 0.15, 1.0], [0.14, 0.12, 0.11, 0.0]];
+
+/// Effets de lueur connus, par nom d'effet composite.
+pub const GLOWS: [Glow; 2] = [
+    // `Hossen_BulbPlant_1.xml` (Brightness 15,8)
+    Glow {
+        effect: "EFX_PlantBulbs_1",
+        count: 10,
+        radius: 1.5,
+        height: 0.5,
+        life: [5.0, 10.0],
+        rise: [0.05, 0.09],
+        orbit: [0.1, 0.8, 45.0],
+        size: [0.005, 0.05],
+        scale: [1.5, 1.0, 0.5],
+        colors: BULB_COLORS,
+        glow: 15.8 * 6.0 / 11.0,
+        distance: 300.0,
+        light: Some(BULB_LIGHT),
+    },
+    // `Hossen_BulbPlant_2.xml` (Brightness 13,7) : vies plus courtes, orbites plus larges
+    Glow {
+        effect: "EFX_PlantBulbs_2",
+        count: 10,
+        radius: 1.5,
+        height: 0.5,
+        life: [3.5, 5.0],
+        rise: [0.05, 0.09],
+        orbit: [0.1, 1.5, 45.0],
+        size: [0.005, 0.05],
+        scale: [1.5, 1.0, 0.5],
+        colors: BULB_COLORS,
+        glow: 13.7 * 6.0 / 11.0,
+        distance: 300.0,
+        light: Some(BULB_LIGHT),
+    },
+];
+
+/// Lueur jouée par un acteur d'après ses effets composites (indice dans [`GLOWS`]).
+pub fn glow_of(effects: &[String]) -> Option<usize> {
+    effects.iter().find_map(|e| GLOWS.iter().position(|g| g.effect.eq_ignore_ascii_case(e)))
+}
+
 /// Charge sur le GPU les textures d'un effet qui y manquent.
 pub fn prepare(renderer: &mut crate::render::Renderer, game: &forgelight::GameData, kind: Option<Kind>) {
     for t in kind.map(Kind::textures).unwrap_or_default() {
@@ -498,6 +604,14 @@ mod tests {
         assert_eq!(out.mips.len(), 2);
         // la réduction garde le vert (pas de noir mêlé)
         assert_eq!(&out.mips[1][..3], &[0, 200, 0]);
+    }
+
+    #[test]
+    fn swamp_bulbs_glow() {
+        assert_eq!(glow_of(&["EFX_PlantBulbs_2".into()]), Some(1));
+        assert_eq!(glow_of(&["efx_plantbulbs_1".into()]), Some(0));
+        assert_eq!(glow_of(&["EFX_Autre".into()]), None);
+        assert_eq!(glow_of(&[]), None);
     }
 
     #[test]

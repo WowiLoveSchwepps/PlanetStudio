@@ -182,6 +182,8 @@ pub struct Model {
     pub equip_slot: Option<String>,
     /// emplacements qu'il masque quand il est porté (.adr `CoveredSlots`)
     pub covered_slots: Vec<String>,
+    /// effets composites de l'acteur (.adr `EffectList`), ex. `EFX_PlantBulbs_1`
+    pub effects: Vec<String>,
 }
 
 fn read_elem(ty: ElemType, b: &[u8]) -> Vec4 {
@@ -439,6 +441,7 @@ impl Model {
             warnings,
             equip_slot: None,
             covered_slots: Vec::new(),
+            effects: Vec::new(),
         })
     }
 }

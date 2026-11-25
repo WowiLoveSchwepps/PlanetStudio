@@ -22,6 +22,9 @@ pub struct Adr {
     /// emplacements masqués quand cet acteur est porté : `<CoveredSlots name="CustomizationHead"/>`
     /// d'une cagoule intégrale cache la tête (`EquippedSlotName="CustomizationHead"`)
     pub covered_slots: Vec<String>,
+    /// effets composites joués en continu sur l'acteur (`<EffectList><Effect type="compositeEffect"
+    /// name="EFX_PlantBulbs_1"/>`) : lueurs, fumées, insectes autour d'un objet du décor
+    pub effects: Vec<String>,
 }
 
 impl Adr {
@@ -51,6 +54,11 @@ impl Adr {
                     }
                 }
                 "EquipType" => adr.equip_slot = n.attribute("EquippedSlotName").map(String::from),
+                "Effect" if n.parent().is_some_and(|p| p.has_tag_name("EffectList")) => {
+                    if let Some(s) = n.attribute("name").filter(|s| !s.is_empty()) {
+                        adr.effects.push(s.into())
+                    }
+                }
                 "CoveredSlots" => {
                     if let Some(s) = n.attribute("name").filter(|s| !s.is_empty()) {
                         adr.covered_slots.push(s.into())
@@ -60,5 +68,23 @@ impl Adr {
             }
         }
         Ok(adr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effect_list() {
+        let xml = r#"<ActorRuntime>
+    <Base fileName="Hossin_Props_SwampBulbs02_LOD0.dme" paletteName="Hossin_Props_SwampBulbs02_Lod0.dma" />
+    <EffectList>
+        <Effect toolName="fx" type="compositeEffect" name="EFX_PlantBulbs_1" id="5071" />
+    </EffectList>
+</ActorRuntime>"#;
+        let adr = Adr::parse(xml.as_bytes()).unwrap();
+        assert_eq!(adr.effects, ["EFX_PlantBulbs_1"]);
+        assert_eq!(adr.base_model.as_deref(), Some("Hossin_Props_SwampBulbs02_LOD0.dme"));
     }
 }

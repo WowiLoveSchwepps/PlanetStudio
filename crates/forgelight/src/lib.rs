@@ -187,6 +187,7 @@ impl GameData {
             model.name = name.to_string();
             model.equip_slot = adr.equip_slot;
             model.covered_slots = adr.covered_slots;
+            model.effects = adr.effects;
             Ok(model)
         } else {
             self.load_dme(name)

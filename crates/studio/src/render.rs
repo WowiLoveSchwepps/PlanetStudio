@@ -1569,6 +1569,207 @@ fn particle_shader_source() -> String {
     format!("{common}\n{PARTICLE_SHADER}")
 }
 
+/// Lueurs attachées aux objets (voir [`crate::particles::Glow`]) : comme [`PARTICLE_SHADER`], mais
+/// chaque particule appartient à un objet (`anchors` : position, échelle) au lieu d'une boîte qui
+/// suit la caméra. Points de lumière sans éclairage (`LitMode` 0 du jeu), ronds et doux.
+const GLOW_SHADER: &str = r#"
+struct GlowU {
+    // rayon du disque d'apparition, sa hauteur, vitesse de montée max, accélération vers le haut
+    spawn: vec4<f32>,
+    // vie min et max (s), temps (s), particules par objet
+    life: vec4<f32>,
+    // orbite : rayon min et max (m), vitesse max (rad/s) ; lumière propre
+    orbit: vec4<f32>,
+    // côté min et max (m), taille de l'image (pixels)
+    size: vec4<f32>,
+    // taille au début, au milieu et à la fin de la vie ; distance d'affichage (m)
+    scale: vec4<f32>,
+    // couleur (linéaire) et opacité au début, au milieu et à la fin de la vie
+    c0: vec4<f32>,
+    c1: vec4<f32>,
+    c2: vec4<f32>,
+};
+@group(1) @binding(0) var<uniform> gu: GlowU;
+// position (repère du studio) et échelle de chaque objet
+@group(1) @binding(1) var<storage, read> anchors: array<vec4<f32>>;
+
+fn luma(c: vec3<f32>) -> f32 {
+    return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
+fn pcg(x: u32) -> u32 {
+    let s = x * 747796405u + 2891336453u;
+    let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+fn rnd(s: ptr<function, u32>) -> f32 {
+    *s = pcg(*s);
+    return f32(*s >> 8u) / 16777216.0;
+}
+// courbe du jeu : début → milieu → fin, linéaire par moitié
+fn curve3(a: vec4<f32>, b: vec4<f32>, c: vec4<f32>, x: f32) -> vec4<f32> {
+    if (x < 0.5) {
+        return mix(a, b, x * 2.0);
+    }
+    return mix(b, c, x * 2.0 - 1.0);
+}
+
+struct GOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) wpos: vec3<f32>,
+    @location(2) color: vec4<f32>,
+};
+
+// Une particule = un carré (6 sommets). Elle ne dépend que de son objet, de son numéro et du
+// temps : la graine vient de la position de l'objet (l'ordre des objets change d'une image à
+// l'autre, pas leur place).
+@vertex
+fn vs_glow(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) -> GOut {
+    var o: GOut;
+    o.clip = vec4<f32>(0.0, 0.0, 2.0, 1.0);
+    o.uv = vec2<f32>(0.0);
+    o.wpos = vec3<f32>(0.0);
+    o.color = vec4<f32>(0.0);
+
+    let per = max(u32(gu.life.w), 1u);
+    let an = anchors[inst / per];
+    let k = inst % per;
+    let sc = max(an.w, 0.01);
+    var s0 = pcg(bitcast<u32>(an.x) ^ pcg(bitcast<u32>(an.z) ^ pcg(bitcast<u32>(an.y) + k * 2654435761u)));
+    let life = max(mix(gu.life.x, gu.life.y, rnd(&s0)), 0.1);
+    let tt = max(gu.life.z, 0.0) / life + rnd(&s0);
+    let cycle = u32(floor(tt));
+    let age = fract(tt);
+    var s = pcg(s0 ^ (cycle * 2246822519u));
+    let t = age * life;
+
+    // naissance sur le disque, orbite autour de l'axe vertical, montée qui s'accélère
+    let rr = gu.spawn.x * sqrt(rnd(&s));
+    let th = rnd(&s) * 6.2831853;
+    let orb_r = mix(gu.orbit.x, gu.orbit.y, rnd(&s));
+    let orb_w = gu.orbit.z * rnd(&s);
+    let ph = rnd(&s) * 6.2831853;
+    let v0 = gu.spawn.z * rnd(&s);
+    var p = vec3<f32>(cos(th) * rr, gu.spawn.y, sin(th) * rr);
+    p += vec3<f32>(cos(ph + orb_w * t), 0.0, sin(ph + orb_w * t)) * orb_r;
+    p.y += v0 * t + 0.5 * gu.spawn.w * t * t;
+    let q = an.xyz + p * sc;
+
+    let cam = g.cam_pos.xyz;
+    let d = length(q - cam);
+    let col = curve3(gu.c0, gu.c1, gu.c2, age);
+    var a = col.a * smoothstep(0.0, 0.04, age);
+    a *= 1.0 - smoothstep(gu.scale.w * 0.85, gu.scale.w, d);
+    a *= smoothstep(0.1, 0.4, d);
+
+    let size_r = rnd(&s);
+    let sz_k = curve3(vec4<f32>(gu.scale.x), vec4<f32>(gu.scale.y), vec4<f32>(gu.scale.z), age).x;
+    var h = mix(gu.size.x, gu.size.y, size_r) * 0.5 * sz_k * sc;
+
+    let f = (cam - q) / max(d, 1e-3);
+    var right = cross(vec3<f32>(0.0, 1.0, 0.0), f);
+    if (length(right) < 1e-3) {
+        right = vec3<f32>(1.0, 0.0, 0.0);
+    }
+    right = normalize(right);
+    let up = cross(f, right);
+
+    // un point plus petit qu'un pixel scintillerait : on le grossit en baissant son opacité
+    // d'autant (même quantité de lumière à l'écran)
+    let p0 = g.view_proj * vec4<f32>(q, 1.0);
+    if (p0.w <= 0.05) { return o; }
+    let p1 = g.view_proj * vec4<f32>(q + right * h, 1.0);
+    let px = length((p1.xy / max(p1.w, 1e-3) - p0.xy / p0.w) * gu.size.zw * 0.5);
+    if (px < 1.0) {
+        let kk = 1.0 / max(px, 1e-3);
+        h *= kk;
+        a /= kk * kk;
+    }
+    if (a <= 0.0005) { return o; }
+
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0),
+    );
+    let c = corners[vi % 6u];
+    let wp = q + right * (c.x * h) + up * (c.y * h);
+    o.clip = g.view_proj * vec4<f32>(wp, 1.0);
+    o.uv = c;
+    o.wpos = q;
+    o.color = vec4<f32>(col.rgb * gu.orbit.w, min(a, 1.0));
+    return o;
+}
+
+// Sortie prémultipliée : un disque doux (le carré blanc du jeu, vu de loin, n'est qu'un point).
+@fragment
+fn fs_glow(i: GOut) -> @location(0) vec4<f32> {
+    let r2 = dot(i.uv, i.uv);
+    let shape = exp(-r2 * 3.0) * (1.0 - smoothstep(0.7, 1.0, r2));
+    let a = clamp(shape * i.color.a, 0.0, 1.0);
+    let c = apply_fog(i.color.rgb * g.quality.y, i.wpos);
+    return vec4<f32>(c * a, a);
+}
+"#;
+
+/// Source des lueurs : les déclarations communes de [`SHADER`], puis [`GLOW_SHADER`].
+fn glow_shader_source() -> String {
+    let common = SHADER.split("struct ActorU").next().unwrap_or(SHADER);
+    format!("{common}\n{GLOW_SHADER}")
+}
+
+/// Objets à lueur dessinés au plus par effet (les plus proches de la caméra).
+const MAX_GLOW_OBJECTS: usize = 2048;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GlowUniform {
+    spawn: [f32; 4],
+    life: [f32; 4],
+    orbit: [f32; 4],
+    size: [f32; 4],
+    scale: [f32; 4],
+    c0: [f32; 4],
+    c1: [f32; 4],
+    c2: [f32; 4],
+}
+
+/// Un effet de lueur prêt à dessiner : ses paramètres et les objets qui le jouent.
+struct GpuGlow {
+    uniform: wgpu::Buffer,
+    anchors: wgpu::Buffer,
+    /// objets que `anchors` peut contenir
+    cap: usize,
+    bind: wgpu::BindGroup,
+}
+
+impl GpuGlow {
+    fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, cap: usize) -> Self {
+        let cap = cap.max(1);
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("lueurs"),
+            size: std::mem::size_of::<GlowUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let anchors = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("lueurs : objets"),
+            size: (cap * 16) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("lueurs"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: anchors.as_entire_binding() },
+            ],
+        });
+        Self { uniform, anchors, cap, bind }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct ParticleUniform {
@@ -1962,6 +2163,8 @@ fn is_linear_texture(name: &str) -> bool {
 
 pub struct GpuModel {
     meshes: Vec<GpuMesh>,
+    /// lueur jouée par l'objet (indice dans [`crate::particles::GLOWS`])
+    glow: Option<usize>,
     /// positions de repos des os (pour cadrer l'ombre : os courant = skin × repos)
     bind_bones: Vec<Vec3>,
     bounds: (Vec3, Vec3),
@@ -2224,6 +2427,14 @@ pub struct Renderer {
     particles: Vec<GpuParticles>,
     particle_kind: Option<crate::particles::Kind>,
     particle_settings: crate::particles::Particles,
+    glow_layout: wgpu::PipelineLayout,
+    glow_bind_layout: wgpu::BindGroupLayout,
+    glow_shader: wgpu::ShaderModule,
+    glow_pipeline: wgpu::RenderPipeline,
+    /// un par effet de [`crate::particles::GLOWS`]
+    glows: Vec<GpuGlow>,
+    /// objets du décor qui jouent une lueur : effet, position (repère du décor), échelle
+    decor_glows: Vec<(usize, Vec3, f32)>,
     /// temps de la timeline (s) : position des particules, défilement des nuages
     pub particle_time: f32,
     /// sillages des personnages dans l'eau du décor, à l'image courante (voir `wake.rs`)
@@ -2703,7 +2914,46 @@ impl Renderer {
             bind_group_layouts: &[&globals_layout, &particle_bind_layout],
             push_constant_ranges: &[],
         });
-        let particle_pipeline = Self::particle_pipeline(&device, &particle_shader, &particle_layout, DEFAULT_SAMPLES);
+        let particle_pipeline =
+            Self::particle_pipeline(&device, &particle_shader, &particle_layout, DEFAULT_SAMPLES, ["vs_particle", "fs_particle"]);
+
+        // lueurs attachées aux objets (bulbes des marais d'Hossin)
+        let glow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("lueurs"),
+            source: wgpu::ShaderSource::Wgsl(glow_shader_source().into()),
+        });
+        let glow_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("lueurs"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let glow_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("lueurs"),
+            bind_group_layouts: &[&globals_layout, &glow_bind_layout],
+            push_constant_ranges: &[],
+        });
+        let glow_pipeline = Self::particle_pipeline(&device, &glow_shader, &glow_layout, DEFAULT_SAMPLES, ["vs_glow", "fs_glow"]);
+        let glows = crate::particles::GLOWS.iter().map(|_| GpuGlow::new(&device, &glow_bind_layout, 64)).collect();
         // les bandes d'images ne bouclent pas : pas de bavure d'une image sur l'autre au bord
         let particle_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("particules"),
@@ -2835,6 +3085,12 @@ impl Renderer {
             particles: Vec::new(),
             particle_kind: None,
             particle_settings: Default::default(),
+            glow_layout,
+            glow_bind_layout,
+            glow_shader,
+            glow_pipeline,
+            glows,
+            decor_glows: Vec::new(),
             particle_time: 0.0,
             wakes: Default::default(),
             sat_bind_layout,
@@ -3030,24 +3286,26 @@ impl Renderer {
     }
 
     /// Particules : carrés mélangés (couleur prémultipliée), testés en profondeur sans l'écrire.
+    /// `entry` : points d'entrée du sommet et du fragment (particules d'ambiance ou lueurs).
     fn particle_pipeline(
         device: &wgpu::Device,
         shader: &wgpu::ShaderModule,
         layout: &wgpu::PipelineLayout,
         samples: u32,
+        entry: [&str; 2],
     ) -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("particules"),
+            label: Some(entry[0]),
             layout: Some(layout),
             vertex: wgpu::VertexState {
                 module: shader,
-                entry_point: Some("vs_particle"),
+                entry_point: Some(entry[0]),
                 compilation_options: Default::default(),
                 buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
-                entry_point: Some("fs_particle"),
+                entry_point: Some(entry[1]),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: HDR_FORMAT,
@@ -3341,7 +3599,9 @@ impl Renderer {
         self.ground_pipeline = p.ground;
         self.sky_pipeline = Self::sky_pipeline(&self.device, &self.sky_shader, &self.sky_layout, samples);
         self.sat_pipeline = Self::sat_pipeline(&self.device, &self.sky_shader, &self.sat_layout, samples);
-        self.particle_pipeline = Self::particle_pipeline(&self.device, &self.particle_shader, &self.particle_layout, samples);
+        self.particle_pipeline =
+            Self::particle_pipeline(&self.device, &self.particle_shader, &self.particle_layout, samples, ["vs_particle", "fs_particle"]);
+        self.glow_pipeline = Self::particle_pipeline(&self.device, &self.glow_shader, &self.glow_layout, samples, ["vs_glow", "fs_glow"]);
         self.post.set_samples(&self.device, samples);
         self.samples = samples;
     }
@@ -3758,7 +4018,12 @@ impl Renderer {
             .collect();
         let bind_bones = model.skeleton.bones.iter().map(|b| b.bind_world.w_axis.truncate()).collect();
         self.models
-            .insert(asset.to_string(), GpuModel { meshes, bind_bones, bounds: (model.bounds_min, model.bounds_max) });
+            .insert(asset.to_string(), GpuModel {
+                meshes,
+                glow: crate::particles::glow_of(&model.effects),
+                bind_bones,
+                bounds: (model.bounds_min, model.bounds_max),
+            });
     }
 
     pub fn forget_actor(&mut self, id: u64) {
@@ -3777,12 +4042,12 @@ impl Renderer {
     /// caméra, les plus proches d'abord (au plus [`MAX_LIGHTS`]). Une lumière compte d'après la
     /// distance de la caméra au bord de sa portée ; près de la limite de la liste, elle s'atténue
     /// en fondu ([`LIGHT_FADE`]) pour entrer et sortir sans saut quand la caméra bouge.
-    fn light_uniform(&self, eye: Vec3, view_proj: Mat4) -> (usize, [[f32; 4]; MAX_LIGHTS * 3]) {
+    /// `glows` : objets à lueur de l'image (voir [`Self::glow_objects`]), qui éclairent aussi autour
+    /// d'eux (bulbes des marais), avec l'intensité des zones émissives.
+    fn light_uniform(&self, eye: Vec3, view_proj: Mat4, glows: &[(usize, Vec3, f32)]) -> (usize, [[f32; 4]; MAX_LIGHTS * 3]) {
         let mut out = [[0.0; 4]; MAX_LIGHTS * 3];
         let k = LIGHT_STRENGTH * self.decor_lights_strength.max(0.0);
-        if !self.decor_lights_on || !self.decor_active() || k <= 0.0 {
-            return (0, out);
-        }
+        let k_glow = LIGHT_STRENGTH * self.emissive.max(0.0);
         // décor relevé ou abaissé (« sol à ») : les lumières suivent
         let lift = Vec3::new(0.0, self.decor_base_ground - self.decor_ground, 0.0);
         // plans du champ (gauche, droite, bas, haut, devant la caméra), tirés de la projection
@@ -3790,11 +4055,22 @@ impl Renderer {
         let planes = [m.w_axis + m.x_axis, m.w_axis - m.x_axis, m.w_axis + m.y_axis, m.w_axis - m.y_axis, m.w_axis]
             .map(|p| p / p.truncate().length().max(1e-6));
         let visible = |c: Vec3, r: f32| planes.iter().all(|p| p.truncate().dot(c) + p.w > -r);
-        let mut near: Vec<(f32, &DecorLight)> = self
-            .decor_lights
+        // lumières dans le repère du studio, couleur × force
+        let mut all: Vec<DecorLight> = Vec::new();
+        if self.decor_lights_on && self.decor_active() && k > 0.0 {
+            all.extend(self.decor_lights.iter().map(|l| DecorLight { pos: l.pos + lift, color: l.color * k, ..*l }));
+        }
+        if k_glow > 0.0 {
+            all.extend(glows.iter().filter_map(|&(g, pos, scale)| {
+                let l = crate::particles::GLOWS[g].light?;
+                let color = Vec3::from(l.color.map(|c| crate::sky::srgb_to_linear(c as f32))) * l.intensity * k_glow;
+                Some(DecorLight { pos: pos + Vec3::Y * (l.height * scale), range: l.range * scale.max(0.1), color, spot: None })
+            }));
+        }
+        let mut near: Vec<(f32, &DecorLight)> = all
             .iter()
-            .filter(|l| visible(l.pos + lift, l.range))
-            .map(|l| (((l.pos + lift) - eye).length() - l.range, l))
+            .filter(|l| visible(l.pos, l.range))
+            .map(|l| ((l.pos - eye).length() - l.range, l))
             .collect();
         let n = near.len().min(MAX_LIGHTS);
         if n == 0 {
@@ -3809,8 +4085,8 @@ impl Renderer {
         };
         for (i, (prio, l)) in near[..n].iter().enumerate() {
             let fade = ((cutoff - prio) / LIGHT_FADE).clamp(0.0, 1.0);
-            let p = l.pos + lift;
-            let c = l.color * k * fade;
+            let p = l.pos;
+            let c = l.color * fade;
             let (dir, ci, co) = l.spot.unwrap_or((Vec3::NEG_Y, -2.0, -2.0));
             out[i * 3] = [p.x, p.y, p.z, l.range];
             out[i * 3 + 1] = [c.x, c.y, c.z, ci];
@@ -3819,9 +4095,92 @@ impl Renderer {
         (n, out)
     }
 
+    /// Lueurs des objets pour cette image : objets du décor et acteurs de la scène qui jouent un
+    /// effet de [`crate::particles::GLOWS`] (`glows`, voir [`Self::glow_objects`]), dans le champ et
+    /// à portée, les plus proches d'abord. Elles suivent l'intensité des zones émissives. Renvoie
+    /// le nombre de particules à dessiner par effet.
+    /// Objets qui jouent une lueur dans cette image : ceux du décor (s'il est affiché) et les
+    /// acteurs de la scène ; effet, position (repère du studio), échelle. Vide quand les zones
+    /// émissives sont éteintes.
+    fn glow_objects(&self, items: &[DrawItem]) -> Vec<(usize, Vec3, f32)> {
+        let mut out = Vec::new();
+        if self.emissive <= 0.0 {
+            return out;
+        }
+        if self.decor_active() {
+            // décor relevé ou abaissé (« sol à ») : les lueurs suivent
+            let lift = Vec3::new(0.0, self.decor_base_ground - self.decor_ground, 0.0);
+            out.extend(self.decor_glows.iter().map(|&(g, pos, scale)| (g, pos + lift, scale)));
+        }
+        for it in items {
+            let Some(g) = self.models.get(&it.asset).and_then(|m| m.glow) else { continue };
+            let Some(w) = it.skin.first() else { continue };
+            out.push((g, w.w_axis.truncate(), w.x_axis.truncate().length()));
+        }
+        out
+    }
+
+    fn update_glows(&mut self, eye: Vec3, view_proj: Mat4, glows: &[(usize, Vec3, f32)], width: u32, height: u32) -> Vec<u32> {
+        use crate::particles::GLOWS;
+        let strength = self.emissive.max(0.0);
+        let mut found: Vec<Vec<(f32, [f32; 4])>> = vec![Vec::new(); GLOWS.len()];
+        let m = view_proj.transpose();
+        let planes = [m.w_axis + m.x_axis, m.w_axis - m.x_axis, m.w_axis + m.y_axis, m.w_axis - m.y_axis, m.w_axis]
+            .map(|p| p / p.truncate().length().max(1e-6));
+        for &(g, pos, scale) in glows {
+            let d = (pos - eye).length();
+            // marge : disque, orbites et montée des particules (quelques mètres)
+            let r = 6.0 * scale.max(0.1);
+            if d - r > GLOWS[g].distance || !planes.iter().all(|p| p.truncate().dot(pos) + p.w > -r) {
+                continue;
+            }
+            found[g].push((d, [pos.x, pos.y, pos.z, scale]));
+        }
+        let mut counts = Vec::with_capacity(GLOWS.len());
+        for (i, (def, mut list)) in GLOWS.iter().zip(found).enumerate() {
+            if list.len() > MAX_GLOW_OBJECTS {
+                list.select_nth_unstable_by(MAX_GLOW_OBJECTS, |a, b| a.0.total_cmp(&b.0));
+                list.truncate(MAX_GLOW_OBJECTS);
+            }
+            if list.is_empty() {
+                counts.push(0);
+                continue;
+            }
+            if list.len() > self.glows[i].cap {
+                self.glows[i] = GpuGlow::new(&self.device, &self.glow_bind_layout, list.len().next_power_of_two());
+            }
+            let anchors: Vec<[f32; 4]> = list.iter().map(|a| a.1).collect();
+            let lin = |c: [f32; 4]| {
+                let l = |v: f32| crate::sky::srgb_to_linear(v * 255.0);
+                [l(c[0]), l(c[1]), l(c[2]), c[3]]
+            };
+            let u = GlowUniform {
+                spawn: [def.radius, def.height, def.rise[0], def.rise[1]],
+                life: [def.life[0], def.life[1], self.particle_time.max(0.0), def.count as f32],
+                orbit: [def.orbit[0], def.orbit[1], def.orbit[2].to_radians(), def.glow * strength],
+                size: [def.size[0], def.size[1], width as f32, height as f32],
+                scale: [def.scale[0], def.scale[1], def.scale[2], def.distance],
+                c0: lin(def.colors[0]),
+                c1: lin(def.colors[1]),
+                c2: lin(def.colors[2]),
+            };
+            self.queue.write_buffer(&self.glows[i].anchors, 0, bytemuck::cast_slice(&anchors));
+            self.queue.write_buffer(&self.glows[i].uniform, 0, bytemuck::bytes_of(&u));
+            counts.push(anchors.len() as u32 * def.count);
+        }
+        counts
+    }
+
     pub fn set_decor(&mut self, instances: &[DecorInstance], ground: f32) {
         self.decor_base_ground = ground;
         self.decor_ground = ground;
+        self.decor_glows = instances
+            .iter()
+            .filter_map(|i| {
+                let g = self.models.get(&i.asset)?.glow?;
+                Some((g, i.matrix.w_axis.truncate(), i.matrix.x_axis.truncate().length()))
+            })
+            .collect();
         self.decor = self.build_decor(instances);
         self.flora = None;
     }
@@ -4271,7 +4630,8 @@ impl Renderer {
             lights: [[0.0; 4]; MAX_LIGHTS * 3],
         };
         let mut g = g;
-        let (n_lights, lights) = self.light_uniform(eye, view_proj);
+        let glow_objs = self.glow_objects(items);
+        let (n_lights, lights) = self.light_uniform(eye, view_proj, &glow_objs);
         g.light_n[0] = n_lights as f32;
         g.lights = lights;
         // sillages : seulement quand le décor (et donc son eau) est dessiné
@@ -4316,6 +4676,8 @@ impl Renderer {
             self.queue.write_buffer(&self.line_buf, 0, bytemuck::cast_slice(&all));
         }
 
+        let Some((tw, th)) = target.or(self.viewport.as_ref()).map(|t| (t.width, t.height)) else { return };
+        let glow_counts = self.update_glows(eye, view_proj, &glow_objs, tw, th);
         let target = match target.or(self.viewport.as_ref()) {
             Some(t) => t,
             None => return,
@@ -4481,6 +4843,16 @@ impl Renderer {
                 for (p, &n) in self.particles.iter().zip(&particle_counts) {
                     if n > 0 {
                         pass.set_bind_group(1, &p.bind, &[]);
+                        pass.draw(0..6, 0..n);
+                    }
+                }
+            }
+            // lueurs des objets (bulbes des marais)
+            if glow_counts.iter().any(|&n| n > 0) {
+                pass.set_pipeline(&self.glow_pipeline);
+                for (gl, &n) in self.glows.iter().zip(&glow_counts) {
+                    if n > 0 {
+                        pass.set_bind_group(1, &gl.bind, &[]);
                         pass.draw(0..6, 0..n);
                     }
                 }

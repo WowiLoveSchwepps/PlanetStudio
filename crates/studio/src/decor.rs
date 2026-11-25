@@ -960,6 +960,7 @@ fn terrain_model(name: &str, texture: &str, normal: Option<&str>, mesh: forgelig
         warnings: Vec::new(),
         equip_slot: None,
         covered_slots: Vec::new(),
+        effects: Vec::new(),
     }
 }
 
@@ -1248,7 +1249,6 @@ mod tests {
         assert!(parse_arg("Nulle:0,0").is_err());
         assert!(is_flora("Indar_Flora_Shrub_01.adr") && !is_flora("Indar_Props_Rocks_AngularLarge.adr"));
     }
-}
 
     #[test]
     fn hossin_lightsticks_hidden() {
@@ -1277,3 +1277,4 @@ mod tests {
         assert_eq!(l.range, 16.0);
         assert!(l.spot.is_none() && l.color.x > l.color.z);
     }
+}
