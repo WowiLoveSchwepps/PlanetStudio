@@ -6,8 +6,8 @@
 //! 1. occlusion ambiante, à demi-résolution, à partir de la seule profondeur : chaque point
 //!    regarde 12 points de son hémisphère ; ceux qui sont cachés par la géométrie l'assombrissent ;
 //! 2. profondeur de champ (au choix) : flou selon la distance au plan de mise au point ;
-//! 3. bloom : extraction de ce qui dépasse un seuil, réductions successives (filtre « dual
-//!    Kawase »), puis remontée en additionnant les niveaux ;
+//! 3. bloom : extraction de ce qui dépasse un seuil, réductions successives (13 lectures, à la
+//!    Call of Duty), puis remontée en mélangeant les niveaux (cœur serré, traîne faible) ;
 //! 4. assemblage : couleur × occlusion (adoucie) + bloom, puis étalonnage (exposition, balance
 //!    des blancs, rendu des tons, contraste, saturation, vignettage, grain), vers l'image sRGB ;
 //! 5. FXAA puis netteté (CAS), au choix, sur l'image finale.
@@ -28,6 +28,25 @@ pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const AO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// au plus 6 niveaux de bloom (de 1/2 à 1/64)
 const BLOOM_LEVELS: usize = 6;
+/// Diffusion du bloom : à la remontée, chaque niveau devient mix(lui-même, plus petit, 0,6).
+/// Le halo final est une moyenne des niveaux aux poids décroissants (0,4 ; 0,24 ; 0,14…) :
+/// un cœur serré autour de la lumière et une traîne large mais faible, au lieu d'un disque
+/// laiteux quand tous les niveaux pesaient autant. De la force 1 à 3, elle monte jusqu'à
+/// `BLOOM_SCATTER_MAX` : le halo s'élargit.
+const BLOOM_SCATTER: f32 = 0.6;
+const BLOOM_SCATTER_MAX: f32 = 0.85;
+/// Renfort du halo par unité de force au-delà de 1 (à 1, une grande zone claire ne s'éclaircit
+/// pas ; à 3, elle prend une fois et demie son excès)
+const BLOOM_EXTRA: f32 = 0.75;
+
+/// Force du halo (au-delà de 1 : renforcé) et diffusion, pour une force de bloom réglée.
+fn bloom_shape(strength: f32) -> (f32, f32) {
+    let s = strength.max(0.0);
+    let over = (s - 1.0).clamp(0.0, 2.0);
+    (s.min(1.0) + over * BLOOM_EXTRA, BLOOM_SCATTER + (BLOOM_SCATTER_MAX - BLOOM_SCATTER) * over / 2.0)
+}
+/// part du halo proche qui éclaire la saleté de l'objectif (× 0,25 dans le shader)
+const DIRT_BLOOM: f32 = 2.0;
 /// Niveau de bloom qui éclaire la saleté de l'objectif : le 1/16 (ou le plus petit), qui contient
 /// aussi les niveaux plus petits après la remontée. Un halo large : une lumière forte fait
 /// apparaître les cercles sur une bonne part de l'image, pas seulement autour d'elle.
@@ -303,6 +322,25 @@ fn fs_dof_smooth(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Part d'une couleur que le bloom diffuse, commune à l'extraction et à l'assemblage (qui la
+/// retire de l'image avant d'y ajouter le halo).
+const BLOOM_EXCESS: &str = r#"
+// Plafond : le disque du soleil (très au-delà de 1) ne doit pas noyer l'image dans un halo
+// blanc. Il ramène la couleur entière à l'échelle (et non chaque canal à part) : une lueur
+// bleue très vive garde un halo bleu au lieu de virer au blanc.
+const BLOOM_CAP: f32 = 16.0;
+
+// ce qui dépasse le seuil `thr`, avec un genou progressif de largeur `knee`
+fn bloom_excess(c: vec3<f32>, thr: f32, knee: f32) -> vec3<f32> {
+    let m = max(c.r, max(c.g, c.b));
+    let b = min(m, BLOOM_CAP);
+    var soft = clamp(b - thr + knee, 0.0, 2.0 * knee);
+    soft = soft * soft / (4.0 * knee + 1e-4);
+    let w = max(soft, b - thr) / max(m, 1e-4);
+    return c * max(w, 0.0);
+}
+"#;
+
 const BLOOM_SHADER: &str = r#"
 struct LevelU {
     // xy : texel de la source ; z : seuil ; w : genou
@@ -314,49 +352,63 @@ struct LevelU {
 @group(0) @binding(1) var t_src: texture_2d<f32>;
 @group(0) @binding(2) var s_lin: sampler;
 
-fn down(uv: vec2<f32>) -> vec3<f32> {
-    let o = lv.src.xy;
-    var c = textureSample(t_src, s_lin, uv).rgb * 4.0;
-    c += textureSample(t_src, s_lin, uv + vec2<f32>(-o.x, -o.y)).rgb;
-    c += textureSample(t_src, s_lin, uv + vec2<f32>(o.x, -o.y)).rgb;
-    c += textureSample(t_src, s_lin, uv + vec2<f32>(-o.x, o.y)).rgb;
-    c += textureSample(t_src, s_lin, uv + vec2<f32>(o.x, o.y)).rgb;
-    return c / 8.0;
+// `extract` : extraction (seuil lu dans `lv.src`, appliqué à chaque lecture comme l'assemblage
+// l'applique à chaque pixel)
+fn tap(uv: vec2<f32>, extract: bool) -> vec3<f32> {
+    let c = textureSampleLevel(t_src, s_lin, uv, 0.0).rgb;
+    if (!extract) { return c; }
+    return bloom_excess(c, lv.src.z, lv.src.w);
 }
 
-// extraction de ce qui dépasse le seuil (genou progressif), puis première réduction
+// Réduction de moitié sur 13 lectures (Jimenez, « Next Generation Post Processing in Call of
+// Duty: Advanced Warfare ») : chaque lecture bilinéaire moyenne 4 texels, l'ensemble couvre
+// 6 × 6 texels de la source. Plus ronde que 4 lectures : pas de carrés ni de pulsation quand
+// une petite lumière se déplace d'un pixel.
+fn down13(uv: vec2<f32>, extract: bool) -> vec3<f32> {
+    let o = lv.src.xy;
+    let a = tap(uv + o * vec2<f32>(-2.0, -2.0), extract);
+    let b = tap(uv + o * vec2<f32>(0.0, -2.0), extract);
+    let c = tap(uv + o * vec2<f32>(2.0, -2.0), extract);
+    let d = tap(uv + o * vec2<f32>(-2.0, 0.0), extract);
+    let e = tap(uv, extract);
+    let f = tap(uv + o * vec2<f32>(2.0, 0.0), extract);
+    let g = tap(uv + o * vec2<f32>(-2.0, 2.0), extract);
+    let h = tap(uv + o * vec2<f32>(0.0, 2.0), extract);
+    let i = tap(uv + o * vec2<f32>(2.0, 2.0), extract);
+    let j = tap(uv + o * vec2<f32>(-1.0, -1.0), extract);
+    let k = tap(uv + o * vec2<f32>(1.0, -1.0), extract);
+    let l = tap(uv + o * vec2<f32>(-1.0, 1.0), extract);
+    let m = tap(uv + o * vec2<f32>(1.0, 1.0), extract);
+    return e * 0.125 + (a + c + g + i) * 0.03125 + (b + d + f + h) * 0.0625 + (j + k + l + m) * 0.125;
+}
+
+// extraction de ce qui dépasse le seuil, et première réduction
 @fragment
 fn fs_prefilter(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
-    // plafond bas : le disque du soleil (très au-delà de 1) ne doit pas noyer l'image dans un halo blanc
-    let c = min(down(fc.xy * lv.dst.xy), vec3<f32>(12.0));
-    let b = max(c.r, max(c.g, c.b));
-    let thr = lv.src.z;
-    let knee = lv.src.w;
-    var soft = clamp(b - thr + knee, 0.0, 2.0 * knee);
-    soft = soft * soft / (4.0 * knee + 1e-4);
-    let w = max(soft, b - thr) / max(b, 1e-4);
-    return vec4<f32>(c * max(w, 0.0), 1.0);
+    return vec4<f32>(down13(fc.xy * lv.dst.xy, true), 1.0);
 }
 
 @fragment
 fn fs_down(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
-    return vec4<f32>(down(fc.xy * lv.dst.xy), 1.0);
+    return vec4<f32>(down13(fc.xy * lv.dst.xy, false), 1.0);
 }
 
-// remontée (additionnée au niveau de destination par le mélange)
+// Remontée : le niveau plus petit, lissé par une tente 3 × 3, est mélangé au niveau de
+// destination par le mélange (constante = diffusion, voir `bloom_shape`)
 @fragment
 fn fs_up(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = fc.xy * lv.dst.xy;
     let o = lv.src.xy;
-    var c = textureSample(t_src, s_lin, uv + vec2<f32>(-o.x * 2.0, 0.0)).rgb;
-    c += textureSample(t_src, s_lin, uv + vec2<f32>(o.x * 2.0, 0.0)).rgb;
-    c += textureSample(t_src, s_lin, uv + vec2<f32>(0.0, -o.y * 2.0)).rgb;
-    c += textureSample(t_src, s_lin, uv + vec2<f32>(0.0, o.y * 2.0)).rgb;
-    c += textureSample(t_src, s_lin, uv + vec2<f32>(-o.x, -o.y)).rgb * 2.0;
-    c += textureSample(t_src, s_lin, uv + vec2<f32>(o.x, -o.y)).rgb * 2.0;
-    c += textureSample(t_src, s_lin, uv + vec2<f32>(-o.x, o.y)).rgb * 2.0;
-    c += textureSample(t_src, s_lin, uv + vec2<f32>(o.x, o.y)).rgb * 2.0;
-    return vec4<f32>(c / 12.0, 1.0);
+    var c = textureSampleLevel(t_src, s_lin, uv, 0.0).rgb * 4.0;
+    c += (textureSampleLevel(t_src, s_lin, uv + vec2<f32>(-o.x, 0.0), 0.0).rgb
+        + textureSampleLevel(t_src, s_lin, uv + vec2<f32>(o.x, 0.0), 0.0).rgb
+        + textureSampleLevel(t_src, s_lin, uv + vec2<f32>(0.0, -o.y), 0.0).rgb
+        + textureSampleLevel(t_src, s_lin, uv + vec2<f32>(0.0, o.y), 0.0).rgb) * 2.0;
+    c += textureSampleLevel(t_src, s_lin, uv + vec2<f32>(-o.x, -o.y), 0.0).rgb
+        + textureSampleLevel(t_src, s_lin, uv + vec2<f32>(o.x, -o.y), 0.0).rgb
+        + textureSampleLevel(t_src, s_lin, uv + vec2<f32>(-o.x, o.y), 0.0).rgb
+        + textureSampleLevel(t_src, s_lin, uv + vec2<f32>(o.x, o.y), 0.0).rgb;
+    return vec4<f32>(c / 16.0, 1.0);
 }
 "#;
 
@@ -604,7 +656,15 @@ fn fs_composite(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
     // l'occlusion est déjà appliquée par la profondeur de champ
     if (pu.dof.x < 0.5) { c = occluded(c, uv); }
     let bloom = textureSampleLevel(t_bloom, s_lin, uv, 0.0).rgb;
-    c = c + bloom * pu.params.z;
+    // Un pixel ne s'éclaire pas de son propre halo : on lui retire la part du halo qui vient de
+    // lui-même (au plus ce qui dépasse le seuil chez lui). Une grande zone claire (ciel autour du
+    // soleil, lueur toute proche), dont le halo vaut à peu près son propre excès, ne blanchit
+    // donc pas : seuls ses bords débordent. Une petite lumière, dont le halo étalé est bien plus
+    // faible que son cœur, garde ce cœur intact et s'entoure du halo entier.
+    if (pu.params.z > 0.0) {
+        let e = bloom_excess(c, pu.params.w, max(pu.params.w * 0.5, 0.05));
+        c = c + bloom * pu.params.z - min(e, bloom) * min(pu.params.z, 1.0);
+    }
     if (pu.lens.x > 0.0) {
         let h = max(pu.frame.w, 1.0);
         let q = (fc.xy + pu.frame.xy - pu.frame.zw * 0.5) / h;
@@ -1031,11 +1091,12 @@ impl Post {
             view_formats: &[],
         });
         let lut_view = lut.create_view(&Default::default());
-        let bloom_src = format!("{FULLSCREEN}{BLOOM_SHADER}");
-        let add = wgpu::BlendState {
+        let bloom_src = format!("{FULLSCREEN}{BLOOM_EXCESS}{BLOOM_SHADER}");
+        // remontée : niveau ← mix(niveau, plus petit lissé, constante de mélange)
+        let scatter = wgpu::BlendState {
             color: wgpu::BlendComponent {
-                src_factor: wgpu::BlendFactor::One,
-                dst_factor: wgpu::BlendFactor::One,
+                src_factor: wgpu::BlendFactor::Constant,
+                dst_factor: wgpu::BlendFactor::OneMinusConstant,
                 operation: wgpu::BlendOperation::Add,
             },
             alpha: wgpu::BlendComponent::REPLACE,
@@ -1043,11 +1104,11 @@ impl Post {
         let prefilter =
             fullscreen_pipeline(device, "bloom_prefilter", bloom_src.clone(), &bloom_layout, "fs_prefilter", HDR_FORMAT, None);
         let down = fullscreen_pipeline(device, "bloom_down", bloom_src.clone(), &bloom_layout, "fs_down", HDR_FORMAT, None);
-        let up = fullscreen_pipeline(device, "bloom_up", bloom_src, &bloom_layout, "fs_up", HDR_FORMAT, Some(add));
+        let up = fullscreen_pipeline(device, "bloom_up", bloom_src, &bloom_layout, "fs_up", HDR_FORMAT, Some(scatter));
         let composite = fullscreen_pipeline(
             device,
             "composite",
-            format!("{FULLSCREEN}{POST_UNIFORM}{COMPOSITE_SHADER}{AO_READ}"),
+            format!("{FULLSCREEN}{POST_UNIFORM}{BLOOM_EXCESS}{COMPOSITE_SHADER}{AO_READ}"),
             &composite_layout,
             "fs_composite",
             final_format,
@@ -1398,8 +1459,10 @@ impl PostTargets {
         let dirt = fx.lens_dirt.clamp(0.0, 1.0);
         // le bloom éclaire la saleté de l'objectif : il est calculé pour elle même s'il est coupé
         let bloom_on = (settings.bloom > 0.0 || dirt > 0.0) && !self.bloom.is_empty();
-        // la remontée additionne tous les niveaux : on ramène la somme à un halo mesuré
-        let bloom_norm = if bloom_on { 2.0 / self.bloom.len() as f32 } else { 0.0 };
+        let thr = settings.bloom_threshold.max(0.0);
+        // genou de l'extraction : le même dans l'assemblage
+        let knee = (thr * 0.5).max(0.05);
+        let (gain, scatter) = bloom_shape(settings.bloom);
         let frame = settings.frame.unwrap_or([0.0, 0.0, self.width as f32, self.height as f32]);
         // flou à l'infini proportionnel à la hauteur de l'image entière, borné par la marge des tuiles
         let coc = (fx.blur.max(0.0) / 100.0 * frame[3]).min(settings.max_coc / 1.5);
@@ -1413,8 +1476,9 @@ impl PostTargets {
             params: [
                 settings.ao.clamp(0.0, 1.0),
                 settings.ao_radius.max(0.01),
-                settings.bloom.max(0.0) * bloom_norm,
-                settings.bloom_threshold,
+                // la remontée rend une moyenne pondérée des niveaux (somme des poids = 1)
+                if bloom_on { gain } else { 0.0 },
+                thr,
             ],
             size: [self.width as f32, self.height as f32, self.ao_size.0 as f32, self.ao_size.1 as f32],
             frame,
@@ -1441,9 +1505,9 @@ impl PostTargets {
             ],
             lens: [
                 if bloom_on { dirt } else { 0.0 },
-                bloom_norm,
-                // le niveau large additionne les niveaux de `dirt_level` au dernier
-                if bloom_on { 1.0 / (self.bloom.len() - dirt_level(self.bloom.len())) as f32 } else { 0.0 },
+                if bloom_on { DIRT_BLOOM } else { 0.0 },
+                // le niveau large est déjà une moyenne des niveaux de `dirt_level` au dernier
+                if bloom_on { 1.0 } else { 0.0 },
                 fx.lens_curve.clamp(0.0, 1.0),
             ],
         };
@@ -1500,8 +1564,7 @@ impl PostTargets {
         };
         if bloom_on {
             // seuil et genou de l'extraction (octets 8 à 16 du tampon du premier niveau)
-            let thr = settings.bloom_threshold.max(0.0);
-            queue.write_buffer(&self.prefilter_bufs[src], 8, bytemuck::cast_slice(&[thr, (thr * 0.5).max(0.05)]));
+            queue.write_buffer(&self.prefilter_bufs[src], 8, bytemuck::cast_slice(&[thr, knee]));
             {
                 let mut p = pass(enc, &self.bloom[0].0, black, "bloom_prefilter");
                 p.set_pipeline(&post.prefilter);
@@ -1514,9 +1577,11 @@ impl PostTargets {
                 p.set_bind_group(0, bind, &[]);
                 p.draw(0..3, 0..1);
             }
+            let s = scatter as f64;
             for (i, bind) in self.up_binds.iter().enumerate().rev() {
                 let mut p = pass(enc, &self.bloom[i].0, wgpu::LoadOp::Load, "bloom_up");
                 p.set_pipeline(&post.up);
+                p.set_blend_constant(wgpu::Color { r: s, g: s, b: s, a: s });
                 p.set_bind_group(0, bind, &[]);
                 p.draw(0..3, 0..1);
             }

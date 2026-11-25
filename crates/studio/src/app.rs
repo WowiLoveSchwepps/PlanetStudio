@@ -1453,7 +1453,7 @@ impl StudioApp {
                 section(ui, tr!("Effets", "Effects"));
                 ui.label("Bloom");
                 ui.add(egui::Slider::new(&mut q.bloom, 0.0..=3.0))
-                    .on_hover_text(tr!("Halo autour des zones très lumineuses (LED, emblèmes, reflets vifs). 0 = désactivé", "Halo around very bright areas (LEDs, emblems, sharp highlights). 0 = off"));
+                    .on_hover_text(tr!("Halo autour des zones très lumineuses (LED, emblèmes, reflets vifs). 0 = désactivé ; au-delà de 1, le halo s'élargit", "Halo around very bright areas (LEDs, emblems, sharp highlights). 0 = off; above 1, the halo widens"));
                 ui.end_row();
                 ui.label(tr!("Occlusion ambiante", "Ambient occlusion"));
                 ui.horizontal(|ui| {
