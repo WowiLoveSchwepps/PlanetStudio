@@ -160,6 +160,49 @@ pub fn is_flora(actor: &str) -> bool {
     a.contains("flora") || a.contains("_grass")
 }
 
+/// Objets de la carte que le jeu ne montre pas : les bâtons lumineux des marais d'Hossin
+/// (`Hossin_Props_Lightstick_Orange/Blue/Red`). Leur maillage, une tige blanche de 1,80 m au bout
+/// en losange (`white.dds`, sans couleur), ne sert qu'à porter l'effet `EFX_Hossin_Lightstick_*` :
+/// dans le jeu on ne voit pas la tige.
+pub fn is_hidden_in_game(actor: &str) -> bool {
+    actor.to_ascii_lowercase().starts_with("hossin_props_lightstick_")
+}
+
+/// Couleur (sRGB 0..255) de la lumière d'un bâton lumineux d'Hossin, d'après sa variante. Son
+/// effet `EFX_Hossin_Lightstick_*` (`toolName="Light"`) n'est pas dans les archives : la couleur
+/// suit le nom, l'intensité et la portée ([`LIGHTSTICK_LIGHT`]) sont choisies pour le studio.
+pub fn lightstick_color(actor: &str) -> Option<[u8; 3]> {
+    let a = actor.to_ascii_lowercase();
+    let v = a.strip_prefix("hossin_props_lightstick_")?;
+    Some(if v.starts_with("orange") {
+        [255, 130, 35]
+    } else if v.starts_with("blue") {
+        [60, 150, 255]
+    } else if v.starts_with("red") {
+        [255, 45, 30]
+    } else {
+        return None;
+    })
+}
+
+/// Lampe d'un bâton lumineux : intensité (échelle de [`crate::render::DecorLight`] : 1 = lampe
+/// d'arche), portée (m) et hauteur au-dessus du pied (m, le losange au bout de la tige).
+const LIGHTSTICK_LIGHT: (f32, f32, f32) = (0.5, 8.0, 1.7);
+
+/// Lampe colorée d'un bâton lumineux posé sur la carte, dans le repère du studio.
+fn lightstick_light(actor: &str, inst: &forgelight::zone::Instance, origin: Vec3) -> Option<crate::render::DecorLight> {
+    let c = lightstick_color(actor)?;
+    let (intensity, range, height) = LIGHTSTICK_LIGHT;
+    let tip = inst.matrix().transform_point3(Vec3::new(0.0, height, 0.0));
+    let scale = inst.scale.max_element().max(0.1);
+    Some(crate::render::DecorLight {
+        pos: tip - origin,
+        range: range * scale,
+        color: Vec3::from(c.map(|v| crate::sky::srgb_to_linear(v as f32))) * intensity,
+        spot: None,
+    })
+}
+
 /// Estime la hauteur du sol près du point : les objets y sont posés, on prend le 10e centile
 /// de leurs hauteurs (les toits et passerelles sont plus haut, rien n'est sous le sol).
 pub fn estimate_ground(zone: &Zone, center: [f32; 2]) -> Option<f32> {
@@ -214,7 +257,18 @@ pub fn load(
     // instances retenues
     // (acteur, matrice, ombre portée, teinte de la flore du sol)
     let mut placed: Vec<(String, Mat4, bool, Option<[f32; 3]>)> = Vec::new();
+    // lampes des bâtons lumineux (leur tige, invisible dans le jeu, n'est pas posée)
+    let mut stick_lights = Vec::new();
     for o in &zone.objects {
+        if is_hidden_in_game(&o.actor) {
+            for i in &o.instances {
+                let (dx, dz) = (i.position.x - settings.center[0], i.position.z - settings.center[1]);
+                if dx * dx + dz * dz <= r2 {
+                    stick_lights.extend(lightstick_light(&o.actor, i, origin));
+                }
+            }
+            continue;
+        }
         if !settings.flora && is_flora(&o.actor) {
             continue;
         }
@@ -311,7 +365,7 @@ pub fn load(
         models.push((t.name, Arc::new(t.model)));
     }
     let sky = if settings.sky { load_sky(game, &settings) } else { None };
-    let lights = zone
+    let mut lights: Vec<crate::render::DecorLight> = zone
         .lights
         .iter()
         .filter(|l| {
@@ -320,6 +374,7 @@ pub fn load(
         })
         .map(|l| crate::render::DecorLight::from_zone(l, origin))
         .collect();
+    lights.extend(stick_lights);
     Ok(DecorData { settings, models, textures, instances, failed, has_terrain, sky, lights, ground_flora })
 }
 
@@ -1154,7 +1209,7 @@ pub fn build_overview(game: &GameData, zone_name: &str) -> Result<OverviewImage>
         .with_context(|| format!("pas de vue d'ensemble pour {zone_name}"))?;
     let mut rgba = overview.rgba.clone();
     let s = overview.size as i32;
-    for o in zone.objects.iter().filter(|o| !is_flora(&o.actor)) {
+    for o in zone.objects.iter().filter(|o| !is_flora(&o.actor) && !is_hidden_in_game(&o.actor)) {
         let rock = o.actor.to_ascii_lowercase().contains("rock");
         if rock {
             continue;
@@ -1194,3 +1249,31 @@ mod tests {
         assert!(is_flora("Indar_Flora_Shrub_01.adr") && !is_flora("Indar_Props_Rocks_AngularLarge.adr"));
     }
 }
+
+    #[test]
+    fn hossin_lightsticks_hidden() {
+        for c in ["Orange", "Blue", "Red"] {
+            assert!(is_hidden_in_game(&format!("Hossin_Props_Lightstick_{c}.adr")));
+        }
+        assert!(!is_hidden_in_game("Hossin_Props_SwampBulbs02.adr"));
+    }
+
+    #[test]
+    fn lightstick_lamp() {
+        assert_eq!(lightstick_color("Hossin_Props_Lightstick_Blue.adr"), Some([60, 150, 255]));
+        assert_eq!(lightstick_color("hossin_props_lightstick_red.adr"), Some([255, 45, 30]));
+        assert_eq!(lightstick_color("Hossin_Props_SwampBulbs02.adr"), None);
+        let inst = forgelight::zone::Instance {
+            position: Vec3::new(100.0, 7.0, -50.0),
+            rotation: Vec3::ZERO,
+            scale: Vec3::splat(2.0),
+            id: 0,
+            no_shadow: false,
+            lod_mul: 1.0,
+        };
+        let l = lightstick_light("Hossin_Props_Lightstick_Orange.adr", &inst, Vec3::new(100.0, 5.0, -50.0)).unwrap();
+        // au bout de la tige (1,7 m × 2), portée à l'échelle
+        assert!((l.pos - Vec3::new(0.0, 2.0 + 3.4, 0.0)).length() < 1e-4);
+        assert_eq!(l.range, 16.0);
+        assert!(l.spot.is_none() && l.color.x > l.color.z);
+    }
