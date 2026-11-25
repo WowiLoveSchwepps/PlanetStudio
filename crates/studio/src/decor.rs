@@ -151,6 +151,10 @@ pub struct DecorData {
     pub sky: Option<crate::sky::Sky>,
     /// lumières placées dans le rayon (lampes, projecteurs)
     pub lights: Vec<crate::render::DecorLight>,
+    /// balises lumineuses des antennes et des tours (position, échelle), voir [`beacons`]
+    pub beacons: Vec<(Vec3, f32)>,
+    /// balancement des plantes de la carte (`<Sway>` de son ciel)
+    pub sway: crate::sky::Sway,
     /// flore du sol, posée ensuite autour de la caméra (`None` : végétation désactivée)
     pub ground_flora: Option<GroundFlora>,
 }
@@ -201,6 +205,38 @@ fn lightstick_light(actor: &str, inst: &forgelight::zone::Instance, origin: Vec3
         color: Vec3::from(c.map(|v| crate::sky::srgb_to_linear(v as f32))) * intensity,
         spot: None,
     })
+}
+
+/// Balises lumineuses des objets posés : les points de leurs effets `Lights_*_red` (antennes,
+/// tours d'avant-poste), lus dans les `.xml` (voir [`forgelight::fx`]) et placés comme l'objet.
+/// Échelle : côté de la balise rapporté à [`crate::particles::BEACON_SIZE`], fois celle de l'objet.
+fn beacons(game: &GameData, models: &[(String, Arc<Model>)], instances: &[DecorInstance]) -> Vec<(Vec3, f32)> {
+    let mut by_effect: std::collections::HashMap<String, Vec<forgelight::fx::Beacon>> = Default::default();
+    let mut by_actor: std::collections::HashMap<&str, Vec<(Vec3, f32)>> = Default::default();
+    for (a, m) in models {
+        let mut pts = Vec::new();
+        for e in &m.effects {
+            let Some(file) = forgelight::fx::beacon_file(e) else { continue };
+            let list = by_effect.entry(file.to_ascii_lowercase()).or_insert_with(|| {
+                game.read(&file)
+                    .and_then(|d| forgelight::fx::parse_beacons(&d))
+                    .inspect_err(|err| eprintln!("balises {file} : {err:#}"))
+                    .unwrap_or_default()
+            });
+            let offset = forgelight::fx::composite_offset(e);
+            pts.extend(list.iter().map(|b| (offset + b.pos, b.size / crate::particles::BEACON_SIZE)));
+        }
+        if !pts.is_empty() {
+            by_actor.insert(a.as_str(), pts);
+        }
+    }
+    let mut out = Vec::new();
+    for i in instances {
+        let Some(pts) = by_actor.get(i.asset.as_str()) else { continue };
+        let scale = i.matrix.x_axis.truncate().length();
+        out.extend(pts.iter().map(|&(p, s)| (i.matrix.transform_point3(p), s * scale)));
+    }
+    out
 }
 
 /// Estime la hauteur du sol près du point : les objets y sont posés, on prend le 10e centile
@@ -375,7 +411,9 @@ pub fn load(
         .map(|l| crate::render::DecorLight::from_zone(l, origin))
         .collect();
     lights.extend(stick_lights);
-    Ok(DecorData { settings, models, textures, instances, failed, has_terrain, sky, lights, ground_flora })
+    let beacons = beacons(game, &models, &instances);
+    let sway = crate::sky::sway(game, &settings.zone);
+    Ok(DecorData { settings, models, textures, instances, failed, has_terrain, sky, lights, beacons, sway, ground_flora })
 }
 
 // ---------------------------------------------------------------- flore du sol
@@ -924,6 +962,7 @@ fn terrain_model(name: &str, texture: &str, normal: Option<&str>, mesh: forgelig
             tangent: [0.0; 4],
             uv1: uv.to_array(),
             uv2: uv.to_array(),
+            color: [0.0; 4],
         })
         .collect();
     let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
@@ -1176,6 +1215,8 @@ pub fn upload(renderer: &mut crate::render::Renderer, data: &DecorData) {
         }
     }
     renderer.set_decor(&data.instances, data.settings.ground.unwrap_or(0.0));
+    renderer.add_decor_beacons(&data.beacons);
+    renderer.set_decor_sway(Some(data.sway));
     renderer.set_decor_lights(&data.lights);
     renderer.decor_visible = data.settings.visible;
     renderer.set_sky(data.sky.as_ref());

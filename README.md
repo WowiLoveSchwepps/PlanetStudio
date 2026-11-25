@@ -472,6 +472,27 @@ son empreinte.
     nuit (piste des Tech Plants sous ses arches, par exemple). Les 128 plus proches de la caméra
     parmi celles qui éclairent le champ comptent (celles en limite entrent et sortent en fondu), sans ombre (leurs portées sont courtes : 10 m en médiane). Le curseur « force »
     les renforce ou les atténue ; le réglage est enregistré dans le projet.
+  - **Plantes dans le vent** : arbres, buissons, fougères et herbes se balancent. Le poids de
+    chaque sommet vient du jeu (couleur des sommets des feuillages et des troncs : nul au pied,
+    jusqu'à 0,4 dans les couronnes ; selon la hauteur pour les herbes de la flore du sol), le
+    rythme du vent de la carte (`<Wind><Sway>` de son ciel : des rafales tous les 90 m qui
+    avancent à 14 m/s sur Indar, Amerish et Hossin, plus larges et plus rapides sur Esamir). Le
+    shader du jeu n'étant pas dans les archives, le mouvement est reconstruit : les plantes se
+    penchent dans les rafales, oscillent chacune à leur rythme et leurs feuilles frémissent. Les
+    ombres suivent. Le mouvement suit la timeline (lecture, photos et vidéos identiques). Les
+    curseurs « vent » et « direction du vent » du menu Particules règlent sa force (0 : plantes
+    immobiles) et sa direction, même sans particules.
+  - **Balises rouges** : les antennes de communication et les tours d'avant-poste ont leurs feux
+    d'obstacle, lus dans les effets du jeu (`Lights_CommunicationEquip_*_red.xml`,
+    `Lights_OutpostTower_red.xml`) : un point rouge au sommet du mât et au bout des bras, qui
+    s'allume une demi-seconde toutes les secondes et demie et grossit avec la distance pour rester
+    visible de loin (jusqu'à 800 m).
+  - **Matériaux lumineux** : les bandes des portails de distorsion (`Glow`), les écrans
+    holographiques des consoles et des murs de moniteurs (`BumpRigidHologram*`), les ampoules
+    unies (`SimpleEmissive`) et la grille des bacs du Biolab (`GlowBlend*`) ajoutent leur lumière
+    au lieu d'être éclairés comme une surface mate ; le noir y est transparent. Ils suivent
+    l'intensité des zones émissives (qualité graphique). Le bouclier du stand de tir de la VR
+    (`AdditiveGlow`) est dessiné comme un champ de force.
   - Le décor se masque ou se retire depuis le menu, et il est enregistré dans le projet.
   - **Particules d'ambiance** (menu Décor > Particules) : feuilles vertes qui tombent en
     tournoyant sur Hossin, vent de sable sur Indar (nuages de poussière au ras du sol, grains
@@ -631,6 +652,7 @@ flcli eco <dossier_jeu> Indar 15              # où pousse l’herbe verte (éco
 flcli zone <dossier_jeu> Indar @2342,-2079,8  # acteurs ayant une instance à moins de 8 m du point
 flcli png <dossier_jeu> snow_strip.dds neige.png  # décode une texture en PNG
 flcli versions <dossier_jeu> sky_amerish.xml copies   # chaque copie d'un asset dans les archives
+flcli audit <dossier_jeu> Hossin              # acteurs, textures, effets et matériaux du décor
 ```
 
 Animation FBX Mixamo transférée sur un soldat (ici l'image 110, à 30 i/s) :
@@ -1125,9 +1147,14 @@ crates/studio       l'éditeur (eframe/egui + wgpu)
   n'est pas lu : la façon de mêler les couches (l'une sur l'autre, hauteur de mélange) et la force
   du détail sont estimées. Sans `.cnk0`, le studio revient à un détail de sol et un de roche par
   quart de 128 m, estompé sur 16 m au bord des quarts voisins qui en ont un autre.
-- Pas encore lus : les lumières des cartes (section lumières du `.zone`), les niveaux de détail
-  des objets (toujours le modèle de base) et les effets (`.fxd`). Les particules d'ambiance ne
-  lisent pas les `.xml` d'effets : leurs couches sont décrites dans `particles.rs`, d'après eux. L'eau est simplifiée : opaque, sans
+- Pas encore lus : les niveaux de détail des objets (toujours le modèle de base) et la plupart des
+  effets attachés aux objets (`EffectList` des `.adr`, `.xml` de particules) : faisceaux des
+  ascenseurs gravitationnels et des tubes d'apparition, sauteurs, dépôts de munitions, sauterelles
+  lumineuses d'Hossin, spores d'Amerish, fumées et brumes. Seuls les bulbes des marais (décrits
+  dans `particles.rs`) et les balises rouges (lues dans leurs `.xml`) sont joués. `flcli audit`
+  liste, carte par carte, les effets et les matériaux du décor, et ce qui ne peut pas s'afficher.
+  Les particules d'ambiance ne lisent pas les `.xml` d'effets : leurs couches sont décrites dans
+  `particles.rs`, d'après eux. L'eau est simplifiée : opaque, sans
   transparence (seuls les marais ont les textures du jeu), et elle ne reflète que le ciel, pas les objets ni le terrain (pas de réflexions
   en espace écran ni planaires). Les reflets des objets eux-mêmes ne viennent que de l'ambiance.
 - Certains véhicules sont composés de plusieurs `.adr` (châssis, tourelle…) qu'il faut ajouter et

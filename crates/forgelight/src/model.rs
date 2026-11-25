@@ -21,6 +21,9 @@ pub struct Vertex {
     /// 2e et 3e jeux d'UV (`Texcoord` 1 et 2) ; copies de `uv` s'ils sont absents
     pub uv1: [f32; 2],
     pub uv2: [f32; 2],
+    /// couleur du sommet (`Color` 0, 0..1), gardée seulement sur les plantes, où elle porte le
+    /// poids du balancement dans le vent (voir `sway_weights`) ; zéro ailleurs
+    pub color: [f32; 4],
 }
 
 /// Emplacements de texture des matériaux de personnage : hash du paramètre dans le DMAT, identique
@@ -151,9 +154,12 @@ impl Mesh {
         self.texture_slots.iter().find(|(k, _)| *k == slot).map(|(_, t)| t)
     }
 
-    /// Champ de force (boucliers, portes IFF) : surface translucide et lumineuse.
+    /// Champ de force (boucliers, portes IFF) : surface translucide et lumineuse. Le bouclier du
+    /// stand de tir de la VR (`AdditiveGlow`, couleur `blue.dds` unie et motifs de balayage) en
+    /// est un aussi : peint de sa couleur, il couvrait le stand d'un voile bleu opaque.
     pub fn is_forcefield(&self) -> bool {
-        self.material_definition.to_ascii_lowercase().starts_with("forcefield")
+        let m = self.material_definition.to_ascii_lowercase();
+        m.starts_with("forcefield") || m == "additiveglow"
     }
 
     pub fn accepts_decal(&self) -> bool {
@@ -243,6 +249,68 @@ fn pick_diffuse(textures: &[String]) -> Option<String> {
         .map(|(t, _)| t.clone())
 }
 
+/// Donne une normale aux sommets qui n'en ont pas (nulle ou invalide dans le fichier) : celle des
+/// triangles qui les utilisent, ou la verticale. Un triangle de `Hossin_Props_BlueBulbTrees_Large01`
+/// a ses trois normales à zéro : normalisées dans le shader, elles donnaient un pixel NaN que le
+/// bloom étalait en grand carré noir.
+fn repair_normals(vertices: &mut [Vertex], indices: &[u32]) {
+    let bad = |v: &Vertex| {
+        let n = Vec3::from(v.normal);
+        !n.is_finite() || n.length_squared() < 1e-8
+    };
+    if !vertices.iter().any(bad) {
+        return;
+    }
+    let mut sum = vec![Vec3::ZERO; vertices.len()];
+    for t in indices.chunks_exact(3) {
+        let [a, b, c] = [t[0], t[1], t[2]].map(|i| i as usize);
+        let (Some(pa), Some(pb), Some(pc)) = (vertices.get(a), vertices.get(b), vertices.get(c)) else { continue };
+        let [pa, pb, pc] = [pa, pb, pc].map(|v| Vec3::from(v.position));
+        // (aire comprise : les grands triangles comptent plus)
+        let f = (pb - pa).cross(pc - pa);
+        if f.is_finite() {
+            for i in [a, b, c] {
+                sum[i] += f;
+            }
+        }
+    }
+    for (v, s) in vertices.iter_mut().zip(sum) {
+        if bad(v) {
+            v.normal = s.try_normalize().unwrap_or(Vec3::Y).to_array();
+            // la tangente, orthogonalisée contre l'ancienne normale nulle, n'a plus de sens
+            v.tangent = [0.0; 4];
+        }
+    }
+}
+
+/// Poids du balancement dans le vent (`Vertex::color`), réservés aux plantes. Les feuillages
+/// (`Foliage*`) et les troncs (`Trunk*`, dont les ombres passent par `sway_depth.efb` dans le jeu)
+/// le portent dans la couleur des sommets, la même valeur en R, V et B : 0 au pied d'un tronc,
+/// jusqu'à 0,2 en haut, 0,2 à 0,4 dans la couronne d'un arbre, 0 à 0,13 vers le bord d'un buisson.
+/// Les herbes de la flore du sol (`FloraModel`) n'ont pas de couleur : leur poids suit la
+/// hauteur (nul au pied, [`FLORA_SWAY`] au sommet, en carré pour que la tige plie vers le haut).
+/// Les autres matériaux n'en ont pas (la couleur de leurs sommets sert à autre chose).
+fn sway_weights(vertices: &mut [Vertex], material: &str) {
+    let m = material.to_ascii_lowercase();
+    if m.starts_with("foliage") || m.starts_with("trunk") {
+        return;
+    }
+    if m.starts_with("floramodel") {
+        let top = vertices.iter().map(|v| v.position[1]).fold(0.0f32, f32::max);
+        for v in vertices.iter_mut() {
+            let h = (v.position[1] / top.max(1e-3)).clamp(0.0, 1.0);
+            v.color = [FLORA_SWAY * h * h; 4];
+        }
+        return;
+    }
+    for v in vertices.iter_mut() {
+        v.color = [0.0; 4];
+    }
+}
+
+/// Poids du balancement au sommet d'une herbe de la flore du sol (celui du bord des buissons).
+const FLORA_SWAY: f32 = 0.12;
+
 fn pick_normal(textures: &[String]) -> Option<String> {
     textures.iter().find(|t| t.to_ascii_lowercase().ends_with("_n.dds")).cloned()
 }
@@ -308,6 +376,7 @@ impl Model {
                 let mut uv = Vec2::ZERO;
                 let mut uv1: Option<Vec2> = None;
                 let mut uv2: Option<Vec2> = None;
+                let mut color = Vec4::ZERO;
                 let mut weights = Vec4::new(1.0, 0.0, 0.0, 0.0);
                 let mut idx = [0u32; 4];
                 let mut got_idx = false;
@@ -325,6 +394,7 @@ impl Model {
                         ("Texcoord", 0) => uv = Vec2::new(val.x, val.y),
                         ("Texcoord", 1) => uv1 = Some(Vec2::new(val.x, val.y)),
                         ("Texcoord", 2) => uv2 = Some(Vec2::new(val.x, val.y)),
+                        ("Color", 0) => color = if e.ty == ElemType::D3dColor { val / 255.0 } else { val },
                         ("BlendWeight", 0) => {
                             weights = val;
                             has_weights = true;
@@ -365,8 +435,12 @@ impl Model {
                     tangent: tangent4,
                     uv1: uv1.unwrap_or(uv).to_array(),
                     uv2: uv2.unwrap_or(uv).to_array(),
+                    color: color.to_array(),
                 });
             }
+
+            repair_normals(&mut vertices, &raw.indices);
+            sway_weights(&mut vertices, &def_name);
 
             // indices de palette -> indices d'os globaux, draw call par draw call
             if !skeleton.bones.is_empty() {
@@ -465,4 +539,33 @@ fn palette_indexed(map: &[crate::dme::BoneMapEntry], used: impl Iterator<Item = 
     let mut used = used.peekable();
     used.peek().is_some()
         && used.all(|(idx, w)| (0..4).all(|k| (k > 0 && w[k] <= 0.0) || map.iter().any(|m| m.palette as u32 == idx[k])))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vert(p: [f32; 3], n: [f32; 3]) -> Vertex {
+        Vertex { position: p, normal: n, uv: [0.0; 2], joints: [0; 4], weights: [1.0, 0.0, 0.0, 0.0], tangent: [1.0, 0.0, 0.0, 1.0], uv1: [0.0; 2], uv2: [0.0; 2], color: [0.0; 4] }
+    }
+
+    #[test]
+    fn null_normals_take_the_face() {
+        // triangle couché dans le plan XZ, sens direct vu d'en haut : normale +Y ; le 4e sommet
+        // (isolé, sans triangle) prend la verticale ; une normale valide ne change pas
+        let mut v = vec![
+            vert([0.0, 0.0, 0.0], [0.0; 3]),
+            vert([0.0, 0.0, 1.0], [f32::NAN, 0.0, 0.0]),
+            vert([1.0, 0.0, 0.0], [0.0; 3]),
+            vert([5.0, 0.0, 0.0], [0.0; 3]),
+            vert([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        ];
+        repair_normals(&mut v, &[0, 1, 2]);
+        for x in &v[..4] {
+            assert_eq!(x.normal, [0.0, 1.0, 0.0]);
+            assert_eq!(x.tangent, [0.0; 4]);
+        }
+        assert_eq!(v[4].normal, [1.0, 0.0, 0.0]);
+        assert_eq!(v[4].tangent, [1.0, 0.0, 0.0, 1.0]);
+    }
 }

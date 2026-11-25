@@ -375,7 +375,7 @@ pub fn run(args: &[String]) -> Result<()> {
         let (p, t) = (Default::default(), Default::default());
         let mut data = crate::decor::load(&gd, &s, &Default::default(), &p, &t)?;
         println!(
-            "décor {} autour de ({}, {}) : {} instances, {} modèles, {} textures, {} lampes, sol à {:.1} m ({:.1}s){}",
+            "décor {} autour de ({}, {}) : {} instances, {} modèles, {} textures, {} lampes, {} balises, sol à {:.1} m ({:.1}s){}",
             s.zone,
             s.center[0],
             s.center[1],
@@ -383,6 +383,7 @@ pub fn run(args: &[String]) -> Result<()> {
             data.models.len(),
             data.textures.len(),
             data.lights.len(),
+            data.beacons.len(),
             data.settings.ground.unwrap_or(0.0),
             t0.elapsed().as_secs_f32(),
             if data.failed.is_empty() { String::new() } else { format!(", {} acteurs illisibles", data.failed.len()) }

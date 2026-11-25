@@ -582,6 +582,50 @@ pub fn load(game: &GameData, zone: &str, hour: f32) -> Result<Sky> {
 /// Fichier de ciel d'une carte, son décalage horaire et sa luminosité de nuit (voir
 /// [`LIVE_SKIES`]) ; ciel d'Indar si
 /// la carte n'a pas le sien.
+/// Balancement des plantes de la carte : `<Wind><Sway …/>` de son ciel (« Flora Wind » ; le
+/// `<Wind X Y Z Scale>` qui l'entoure est le vent des particules). Le shader du jeu n'est pas
+/// dans les archives : le studio s'en sert ainsi (voir `sway_offset` dans `render.rs`) :
+/// des fronts de rafales espacés de `spacing` m avancent à `speed` m/s et penchent les plantes,
+/// `smoothing` adoucit (> 1) ou durcit (< 1) les rafales, `boil` fait frémir les feuilles et
+/// `strength` règle l'amplitude. Indar, Amerish, Hossin : 90 m, 14 m/s, force 1,09 ; Esamir :
+/// 150 m, 30 m/s, force 1 ; VR : frémissement 0,2.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sway {
+    pub spacing: f32,
+    pub speed: f32,
+    pub boil: f32,
+    pub smoothing: f32,
+    pub strength: f32,
+}
+
+impl Default for Sway {
+    /// valeurs d'Indar, d'Amerish et d'Hossin
+    fn default() -> Self {
+        Self { spacing: 90.0, speed: 14.0, boil: 0.049, smoothing: 1.481, strength: 1.091 }
+    }
+}
+
+/// Lit `<Sway>` dans le texte d'un ciel.
+fn parse_sway(xml: &str) -> Option<Sway> {
+    let tag = *tags(xml, "Sway").first()?;
+    // (`Speed ="16"` dans le ciel de la VR : espace avant le signe égal)
+    let tag = tag.replace(" =", "=");
+    let f = |n: &str, d: f32| attr(&tag, n).and_then(|v| v.trim().parse().ok()).unwrap_or(d);
+    let d = Sway::default();
+    Some(Sway {
+        spacing: f("Spacing", d.spacing),
+        speed: f("Speed", d.speed),
+        boil: f("Boil", d.boil),
+        smoothing: f("Smoothing", d.smoothing),
+        strength: f("Strength", d.strength),
+    })
+}
+
+/// Balancement des plantes d'une carte (celui d'Indar si son ciel n'en donne pas).
+pub fn sway(game: &GameData, zone: &str) -> Sway {
+    sky_xml(game, zone).and_then(|(xml, ..)| parse_sway(&xml)).unwrap_or_default()
+}
+
 fn sky_xml(game: &GameData, zone: &str) -> Option<(String, f32, [f32; 3])> {
     let text = |d: Vec<u8>| String::from_utf8_lossy(&d).into_owned();
     let valid = |x: &String| !dome_schedule(x).is_empty();
@@ -772,6 +816,15 @@ mod tests {
         assert_eq!(c.weights, [0.1, 0.2, 0.0, 0.1]);
         assert_eq!((c.contrast, c.color), (2.0, [1.0, 0.0, 0.0]));
         assert_eq!(clouds_at("<Sky/>", 12.0), None);
+    }
+
+    #[test]
+    fn sway_of_sky() {
+        let xml = r#"<Sky><Wind X="1.0" Y="0.0" Z="0.0" Scale="2.5"> <!-- Particle Wind -->
+		<Sway Spacing="90" WavefrontScale="4" Speed ="16" Boil="0.2" Dir="180" Smoothing="1" Strength="1.3"/> <!-- Flora Wind -->
+	</Wind></Sky>"#;
+        assert_eq!(parse_sway(xml), Some(Sway { spacing: 90.0, speed: 16.0, boil: 0.2, smoothing: 1.0, strength: 1.3 }));
+        assert_eq!(parse_sway("<Sky></Sky>"), None);
     }
 
     #[test]

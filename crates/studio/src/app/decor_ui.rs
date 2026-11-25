@@ -360,12 +360,16 @@ impl StudioApp {
         let active = p.kind.resolve(self.decor.applied.as_ref().map(|a| a.zone.as_str())).is_some();
         ui.add_enabled_ui(active, |ui| {
             ui.add(egui::Slider::new(&mut p.density, 0.0..=4.0).text(tr!("densité", "density")).custom_formatter(|v, _| format!("{v:.2}×")));
-            ui.add(egui::Slider::new(&mut p.wind, 0.0..=4.0).text(tr!("vent", "wind")).custom_formatter(|v, _| format!("{v:.2}×")))
-                .on_hover_text(tr!("Force du vent (1× : celle de l'effet ; 0 : air calme, les flocons tombent droit)", "Wind strength (1×: the effect's own; 0: still air, flakes fall straight)"));
-            ui.add(egui::Slider::new(&mut p.wind_dir, 0.0..=360.0).step_by(5.0).text(tr!("direction du vent", "wind direction")).suffix("°"))
-                .on_hover_text(tr!("Direction vers laquelle souffle le vent, dans le plan du sol (0° : +X, 90° : +Z)", "Direction the wind blows toward, in the ground plane (0°: +X, 90°: +Z)"));
             ui.add(egui::Slider::new(&mut p.size, 0.25..=4.0).logarithmic(true).text(tr!("taille", "size")).custom_formatter(|v, _| format!("{v:.2}×")));
         });
+        // (le vent fait aussi balancer les plantes du décor : réglable même sans particules)
+        ui.add(egui::Slider::new(&mut p.wind, 0.0..=4.0).text(tr!("vent", "wind")).custom_formatter(|v, _| format!("{v:.2}×")))
+            .on_hover_text(tr!(
+                "Force du vent, pour les particules et le balancement des plantes du décor (1× : celle de la carte ; 0 : air calme, les flocons tombent droit et les plantes ne bougent pas)",
+                "Wind strength, for the particles and the swaying of the scenery's plants (1×: the map's own; 0: still air, flakes fall straight and plants stay still)"
+            ));
+        ui.add(egui::Slider::new(&mut p.wind_dir, 0.0..=360.0).step_by(5.0).text(tr!("direction du vent", "wind direction")).suffix("°"))
+            .on_hover_text(tr!("Direction vers laquelle souffle le vent, dans le plan du sol (0° : +X, 90° : +Z)", "Direction the wind blows toward, in the ground plane (0°: +X, 90°: +Z)"));
         if self.particles != before {
             self.force_render = true;
         }

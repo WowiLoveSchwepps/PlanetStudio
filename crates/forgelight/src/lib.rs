@@ -5,6 +5,7 @@ pub mod dds;
 pub mod dme;
 pub mod fbx;
 pub mod flora;
+pub mod fx;
 pub mod hash;
 pub mod lzham;
 pub mod materials;

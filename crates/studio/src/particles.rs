@@ -445,6 +445,12 @@ pub struct Glow {
     pub distance: f32,
     /// lampe qui éclaire autour de l'objet (le jeu n'en a pas : ajoutée pour le studio)
     pub light: Option<GlowLight>,
+    /// part de la vie où la particule est allumée (1 : tout le temps) ; le reste, elle est éteinte
+    /// jusqu'à la boucle suivante (balises : allumées 0,5 s toutes les 1,5 s)
+    pub duty: f32,
+    /// grossissement avec la distance (`StreakParticle` du jeu : `ScaleStart`, `ScaleEnd` en m,
+    /// `Scaler`) : la taille va de ×1 au début à ×facteur à la fin ; facteur 1 : sans
+    pub grow: [f32; 3],
 }
 
 /// Lumière ponctuelle d'un objet à lueur, comme les lampes placées du décor (même échelle
@@ -468,7 +474,7 @@ const BULB_LIGHT: GlowLight = GlowLight { color: [255, 150, 50], intensity: 0.35
 const BULB_COLORS: [[f32; 4]; 3] = [[1.0, 1.0, 1.0, 0.45], [0.56, 0.39, 0.15, 1.0], [0.14, 0.12, 0.11, 0.0]];
 
 /// Effets de lueur connus, par nom d'effet composite.
-pub const GLOWS: [Glow; 2] = [
+pub const GLOWS: [Glow; 3] = [
     // `Hossen_BulbPlant_1.xml` (Brightness 15,8)
     Glow {
         effect: "EFX_PlantBulbs_1",
@@ -484,6 +490,8 @@ pub const GLOWS: [Glow; 2] = [
         glow: 15.8 * 6.0 / 11.0,
         distance: 300.0,
         light: Some(BULB_LIGHT),
+        duty: 1.0,
+        grow: [0.0, 1.0, 1.0],
     },
     // `Hossen_BulbPlant_2.xml` (Brightness 13,7) : vies plus courtes, orbites plus larges
     Glow {
@@ -500,8 +508,38 @@ pub const GLOWS: [Glow; 2] = [
         glow: 13.7 * 6.0 / 11.0,
         distance: 300.0,
         light: Some(BULB_LIGHT),
+        duty: 1.0,
+        grow: [0.0, 1.0, 1.0],
+    },
+    // balises rouges des antennes et des tours d'avant-poste (`Lights_*_red.xml`, voir
+    // `forgelight::fx`) : un point fixe par balise, posé par le décor (pas par `glow_of`), qui
+    // s'allume 0,5 s toutes les 1,5 s (`LifetimeRange`, `EndTime`) en grandissant puis en
+    // rapetissant (`ScaleCurve` 0,25 → 1 → 0,25, `ColorCurve` 0 → 1 → 0). Côté 0,3 m (0,2 pour
+    // les petites, par l'échelle de l'objet), rouge `ConstantColor` 0,5 / 0 / 0, `Brightness` 15.
+    Glow {
+        effect: "(balise)",
+        count: 1,
+        radius: 0.0,
+        height: 0.0,
+        life: [1.5, 1.5],
+        rise: [0.0, 0.0],
+        orbit: [0.0, 0.0, 0.0],
+        size: [BEACON_SIZE, BEACON_SIZE],
+        scale: [0.25, 1.0, 0.25],
+        colors: [[0.5, 0.0, 0.0, 0.0], [0.5, 0.0, 0.0, 1.0], [0.5, 0.0, 0.0, 0.0]],
+        glow: 15.0 * 6.0 / 11.0,
+        distance: 800.0,
+        light: None,
+        duty: 0.5 / 1.5,
+        // (`Scaler` 3 de 30 à 500 m : elles restent visibles de loin)
+        grow: [30.0, 500.0, 3.0],
     },
 ];
+
+/// Indice des balises lumineuses dans [`GLOWS`].
+pub const BEACON: usize = 2;
+/// Côté de référence d'une balise (m) : une balise d'un autre côté prend l'échelle `size / BEACON_SIZE`.
+pub const BEACON_SIZE: f32 = 0.3;
 
 /// Lueur jouée par un acteur d'après ses effets composites (indice dans [`GLOWS`]).
 pub fn glow_of(effects: &[String]) -> Option<usize> {

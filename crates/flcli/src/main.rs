@@ -30,6 +30,8 @@ Commandes :
   eco <jeu> <Nom> <numéro>          tuiles où un écosystème domine (position x, z du jeu)
   blocs <jeu> <fichier.cnkN>        décompresse un chunk dans <fichier.cnkN>.bin (dossier courant)
   magic <jeu>                       signatures des assets dont le nom est inconnu
+  couleurs <jeu> <modele>...        canaux de la couleur des sommets (balancement des plantes)
+  audit <jeu> [Nom...]              ce qui manque au décor des cartes (toutes sans Nom)
   fbx <fichier.fbx>                 squelette et animation d'un FBX (export Mixamo...)
 ";
 
@@ -854,7 +856,191 @@ fn main() -> Result<()> {
                 println!("{m:<6} {n:>7} assets  {:>8} Mo", sz / 1_000_000);
             }
         }
+        "couleurs" => {
+            // couleurs <jeu> <modele>... : canaux de la couleur des sommets (poids du balancement des
+            // plantes), comparés à la hauteur et à la distance à l'axe vertical
+            for name in &args[2..] {
+                let m = gd.load_model(name)?;
+                println!("== {name}");
+                for (mi, mesh) in m.meshes.iter().enumerate() {
+                    let n = mesh.vertices.len() as f32;
+                    if n == 0.0 {
+                        continue;
+                    }
+                    let ys: Vec<f32> = mesh.vertices.iter().map(|v| v.position[1]).collect();
+                    let rs: Vec<f32> = mesh.vertices.iter().map(|v| v.position[0].hypot(v.position[2])).collect();
+                    let corr = |a: &[f32], b: &[f32]| {
+                        let (ma, mb) = (a.iter().sum::<f32>() / n, b.iter().sum::<f32>() / n);
+                        let (mut c, mut va, mut vb) = (0.0, 0.0, 0.0);
+                        for (x, y) in a.iter().zip(b) {
+                            c += (x - ma) * (y - mb);
+                            va += (x - ma) * (x - ma);
+                            vb += (y - mb) * (y - mb);
+                        }
+                        c / (va * vb).sqrt().max(1e-9)
+                    };
+                    println!(
+                        "  mesh {mi} {} ({} sommets) y {:.2}..{:.2} r ..{:.2}",
+                        mesh.material_definition,
+                        mesh.vertices.len(),
+                        ys.iter().cloned().fold(f32::MAX, f32::min),
+                        ys.iter().cloned().fold(f32::MIN, f32::max),
+                        rs.iter().cloned().fold(0.0, f32::max)
+                    );
+                    for k in 0..4 {
+                        let c: Vec<f32> = mesh.vertices.iter().map(|v| v.color[k]).collect();
+                        let mut distinct: Vec<u32> = c.iter().map(|v| (v * 255.0).round() as u32).collect();
+                        distinct.sort();
+                        distinct.dedup();
+                        println!(
+                            "    octet {k} : {:.3}..{:.3} moy {:.3}, {} valeurs, corr hauteur {:+.2}, corr rayon {:+.2}  ex. {:?}",
+                            c.iter().cloned().fold(f32::MAX, f32::min),
+                            c.iter().cloned().fold(f32::MIN, f32::max),
+                            c.iter().sum::<f32>() / n,
+                            distinct.len(),
+                            corr(&c, &ys),
+                            corr(&c, &rs),
+                            &distinct[..distinct.len().min(8)]
+                        );
+                    }
+                }
+            }
+        }
+        "audit" => {
+            // audit <jeu> [Nom...] : ce que le décor d'une carte ne peut pas montrer
+            let zones: Vec<String> = if args.len() > 2 {
+                args[2..].to_vec()
+            } else {
+                ["Indar", "Amerish", "Esamir", "Hossin", "VR", "Tutorial", "quickload"].map(String::from).to_vec()
+            };
+            for z in &zones {
+                audit_zone(&gd, z)?;
+            }
+        }
         c => bail!("commande inconnue : {c}\n{USAGE}"),
+    }
+    Ok(())
+}
+
+/// Noms des balises d'un document XML (lecture grossière : `<Nom` sans `/`, `?` ni `!`).
+fn xml_tags(text: &str) -> Vec<String> {
+    text.split('<')
+        .skip(1)
+        .filter_map(|s| {
+            let n: String = s.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            (!n.is_empty()).then_some(n)
+        })
+        .collect()
+}
+
+/// Audit d'une carte : acteurs, modèles et textures introuvables, balises `.adr` et effets que le
+/// décor ne lit pas, matériaux par nombre d'instances, lumières écartées.
+fn audit_zone(gd: &GameData, name: &str) -> Result<()> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let file = format!("{name}.zone");
+    let z = forgelight::zone::Zone::parse(&gd.read(&file)?)?;
+    println!("\n===== {file} : {} acteurs, {} instances, {} lumières", z.objects.len(), z.instance_count(), z.lights.len());
+    let mut problems: Vec<(usize, String, String)> = Vec::new();
+    let mut tags: BTreeMap<String, (usize, usize, String)> = BTreeMap::new();
+    let mut effects: BTreeMap<String, (usize, usize, String)> = BTreeMap::new();
+    let mut materials: BTreeMap<String, (usize, usize, String)> = BTreeMap::new();
+    let mut missing_tex: BTreeMap<String, (usize, String)> = BTreeMap::new();
+    let mut warnings: BTreeMap<String, usize> = BTreeMap::new();
+    for o in &z.objects {
+        let n = o.instances.len();
+        let text = match gd.read(&o.actor) {
+            Ok(d) => String::from_utf8_lossy(&d).into_owned(),
+            Err(e) => {
+                problems.push((n, o.actor.clone(), format!("adr introuvable : {e:#}")));
+                continue;
+            }
+        };
+        let seen: BTreeSet<String> = xml_tags(&text).into_iter().collect();
+        for t in seen {
+            let s = tags.entry(t).or_insert((0, 0, o.actor.clone()));
+            s.0 += 1;
+            s.1 += n;
+        }
+        match gd.load_model(&o.actor) {
+            Err(e) => problems.push((n, o.actor.clone(), format!("{e:#}"))),
+            Ok(m) => {
+                for e in &m.effects {
+                    let s = effects.entry(e.clone()).or_insert((0, 0, o.actor.clone()));
+                    s.0 += 1;
+                    s.1 += n;
+                }
+                for w in &m.warnings {
+                    *warnings.entry(w.clone()).or_default() += n;
+                }
+                if m.meshes.is_empty() {
+                    problems.push((n, o.actor.clone(), "aucun maillage".into()));
+                }
+                let mut mats = BTreeSet::new();
+                for mesh in &m.meshes {
+                    mats.insert(mesh.material_definition.clone());
+                    for t in mesh.render_textures() {
+                        // (comme `GameData::read` : un chemin `..\GraphicsData\…` est cherché par son nom seul)
+                        let base = t.rsplit(['\\', '/']).next().unwrap_or(t);
+                        if !gd.index.contains(t) && !gd.index.contains(base) {
+                            let s = missing_tex.entry(t.clone()).or_insert((0, o.actor.clone()));
+                            s.0 += n;
+                        }
+                    }
+                }
+                for mat in mats {
+                    let s = materials.entry(mat).or_insert((0, 0, o.actor.clone()));
+                    s.0 += 1;
+                    s.1 += n;
+                }
+            }
+        }
+    }
+    problems.sort_by_key(|p| std::cmp::Reverse(p.0));
+    println!("-- acteurs non affichables : {}", problems.len());
+    for (n, a, e) in &problems {
+        println!("{n:>6} × {a:<60} {e}");
+    }
+    println!("-- textures introuvables : {}", missing_tex.len());
+    for (t, (n, a)) in &missing_tex {
+        println!("{n:>6} × {t:<50} (ex. {a})");
+    }
+    println!("-- avertissements des modèles");
+    for (w, n) in &warnings {
+        println!("{n:>6} × {w}");
+    }
+    let by_inst = |m: &BTreeMap<String, (usize, usize, String)>| {
+        let mut v: Vec<_> = m.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        v.sort_by_key(|(_, (_, n, _))| std::cmp::Reverse(*n));
+        v
+    };
+    println!("-- balises .adr (acteurs, instances, exemple)");
+    for (t, (a, n, ex)) in by_inst(&tags) {
+        println!("{a:>6} {n:>7}  {t:<28} {ex}");
+    }
+    println!("-- effets des acteurs (acteurs, instances, exemple)");
+    for (t, (a, n, ex)) in by_inst(&effects) {
+        println!("{a:>6} {n:>7}  {t:<40} {ex}");
+    }
+    println!("-- matériaux (acteurs, instances, exemple)");
+    for (t, (a, n, ex)) in by_inst(&materials) {
+        println!("{a:>6} {n:>7}  {t:<40} {ex}");
+    }
+    let spots = z.lights.iter().filter(|l| l.spot).count();
+    let no_range: Vec<_> = z.lights.iter().filter(|l| l.range <= 0.0).collect();
+    let dark = z.lights.iter().filter(|l| l.color == [0, 0, 0] || l.inner_range <= 0.0).count();
+    println!("-- lumières : {} ponctuelles, {spots} projecteurs, {} sans portée (écartées), {dark} noires ou d'intensité nulle", z.lights.len() - spots, no_range.len());
+    let mut names: BTreeMap<String, usize> = BTreeMap::new();
+    for l in &z.lights {
+        let base: String = l.name.trim_end_matches(|c: char| c.is_ascii_digit() || c == '_').to_string();
+        *names.entry(format!("{base} [{}]", l.color_name)).or_default() += 1;
+    }
+    let mut v: Vec<_> = names.into_iter().collect();
+    v.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    for (k, n) in v.iter().take(25) {
+        println!("{n:>6} × {k}");
+    }
+    for l in no_range.iter().take(10) {
+        println!("  sans portée : {} [{}] intensité {} pos {:.0}", l.name, l.color_name, l.inner_range, l.position);
     }
     Ok(())
 }

@@ -76,6 +76,10 @@ struct Globals {
     // par lumière, 3 vec4 : position, portée (m) ; couleur × force (linéaire), cosinus du demi-angle
     // intérieur (−2 : ponctuelle) ; direction du faisceau, cosinus du demi-angle extérieur
     lights: array<vec4<f32>, 384>,
+    // balancement des plantes (voir `sway_offset`) : direction du vent (x, z), amplitude (0 : sans),
+    // temps (s) ; espacement des rafales (m), leur vitesse (m/s), frémissement, lissage
+    sway: vec4<f32>,
+    sway2: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var t_env: texture_2d<f32>;
@@ -349,6 +353,8 @@ struct VIn {
     @location(5) tangent: vec4<f32>,
     @location(6) uv1: vec2<f32>,
     @location(7) uv2: vec2<f32>,
+    // poids du balancement dans le vent (plantes, voir `forgelight::Vertex::color`)
+    @location(8) color: vec4<f32>,
 };
 
 struct VOut {
@@ -448,7 +454,10 @@ fn vs_main(v: VIn) -> VOut {
 fn vs_static(v: VIn, @builtin(instance_index) inst: u32) -> VOut {
     let raw = bones[inst];
     let m = mat4x4<f32>(vec4<f32>(raw[0].xyz, 0.0), vec4<f32>(raw[1].xyz, 0.0), vec4<f32>(raw[2].xyz, 0.0), raw[3]);
-    let wp = m * vec4<f32>(v.pos, 1.0);
+    var wp = m * vec4<f32>(v.pos, 1.0);
+    // plantes : balancement dans le vent, à l'échelle de l'objet
+    let k = length(raw[0].xyz);
+    wp = wp + vec4<f32>(sway_offset(raw[3].xyz, wp.xyz, v.color.x * k, g.sway, g.sway2), 0.0);
     var o: VOut;
     o.clip = g.view_proj * wp;
     o.normal = (m * vec4<f32>(v.normal, 0.0)).xyz;
@@ -1064,6 +1073,15 @@ fn hex_edge(p: vec2<f32>) -> f32 {
 }
 @fragment
 fn fs_forcefield(i: VOut) -> @location(0) vec4<f32> {
+    // matériau lumineux (`Glow`, `SimpleEmissive`, écrans holographiques) : sa couleur s'ajoute
+    // à ce qui est derrière, au gain du matériau (extra2.z) et à l'intensité des zones émissives.
+    // Le brouillard l'atténue sans l'éclaircir (apply_fog est affine en la couleur).
+    if (mat.extra2.z > 0.0) {
+        let tex = textureSample(t_diffuse, s_tex, i.uv);
+        let e = tex.rgb * tex.a * mat.extra2.z * g.flags.y * g.quality.y;
+        let ce = apply_fog(e, i.wpos) - apply_fog(vec3<f32>(0.0), i.wpos);
+        return vec4<f32>(max(ce, vec3<f32>(0.0)), 0.0);
+    }
     let v = normalize(g.cam_pos.xyz - i.wpos);
     let n = normalize(i.normal);
     let ndv = abs(dot(n, v));
@@ -1141,6 +1159,9 @@ fn fs_line(i: LOut) -> @location(0) vec4<f32> {
 const SHADOW_SHADER: &str = r#"
 struct ShadowU {
     light_vp: mat4x4<f32>,
+    // balancement des plantes, comme `Globals`
+    sway: vec4<f32>,
+    sway2: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> sg: ShadowU;
 @group(1) @binding(0) var<storage, read> bones: array<mat4x4<f32>>;
@@ -1149,6 +1170,7 @@ struct VIn {
     @location(0) pos: vec3<f32>,
     @location(3) joints: vec4<u32>,
     @location(4) weights: vec4<f32>,
+    @location(8) color: vec4<f32>,
 };
 
 @vertex
@@ -1165,7 +1187,42 @@ fn vs_shadow_static(v: VIn, @builtin(instance_index) inst: u32) -> @builtin(posi
     // (ligne w : teinte de la flore du sol, voir `vs_static`)
     let raw = bones[inst];
     let m = mat4x4<f32>(vec4<f32>(raw[0].xyz, 0.0), vec4<f32>(raw[1].xyz, 0.0), vec4<f32>(raw[2].xyz, 0.0), raw[3]);
-    return sg.light_vp * (m * vec4<f32>(v.pos, 1.0));
+    let wp = m * vec4<f32>(v.pos, 1.0);
+    let k = length(raw[0].xyz);
+    return sg.light_vp * (wp + vec4<f32>(sway_offset(raw[3].xyz, wp.xyz, v.color.x * k, sg.sway, sg.sway2), 0.0));
+}
+"#;
+
+/// Balancement des plantes dans le vent, commun à [`SHADER`] et [`SHADOW_SHADER`] (les ombres
+/// suivent les feuilles). Le shader du jeu (`Foliage.efb`, `sway_depth.efb`) n'est pas dans les
+/// archives : le mouvement est reconstruit d'après les paramètres `<Sway>` du ciel de la carte
+/// (voir [`crate::sky::Sway`]) et le poids rangé dans la couleur des sommets.
+const SWAY_SHADER: &str = r#"
+// Décalage (repère du monde) d'un sommet de plante. `o` : origine de l'objet, qui donne la phase
+// de ses rafales et de son oscillation (l'objet plie d'un bloc) ; `p` : position du sommet, pour
+// le frémissement des feuilles ; `w` : poids du sommet (0 au pied), fois l'échelle de l'objet.
+// `s` : direction du vent (x, z), amplitude (m pour un poids de 1), temps (s) ; `s2` : espacement
+// des fronts de rafales (m), leur vitesse (m/s), frémissement (`Boil`), lissage (`Smoothing`).
+fn sway_offset(o: vec3<f32>, p: vec3<f32>, w: f32, s: vec4<f32>, s2: vec4<f32>) -> vec3<f32> {
+    if (w <= 0.0 || s.z <= 0.0) {
+        return vec3<f32>(0.0);
+    }
+    let d = s.xy;
+    let t = s.w;
+    // rafales : des fronts espacés de `Spacing` m traversent la carte dans le sens du vent ;
+    // `Smoothing` > 1 les resserre (de longs moments calmes, des coups de vent plus brefs)
+    let ph = 6.2831853 * (dot(o.xz, d) - s2.y * t) / max(s2.x, 1.0);
+    // (pow de 0 n'est pas défini en WGSL : base gardée au-dessus de 0)
+    let gust = pow(max(0.5 + 0.5 * sin(ph), 1e-4), max(s2.w, 0.2));
+    // oscillation propre de chaque plante (retour élastique), à sa fréquence et sa phase
+    let seed = fract(sin(dot(o.xz, vec2<f32>(12.9898, 78.233))) * 43758.547);
+    let osc = sin(t * (1.1 + 0.8 * seed) + seed * 6.2831853);
+    let lean = (0.35 + 0.65 * gust + 0.2 * osc) * w * s.z;
+    // frémissement des feuilles : rapide, propre à chaque sommet, plus fort dans les rafales
+    let fl = sin(t * 6.5 + dot(p, vec3<f32>(2.1, 1.7, 2.9))) * w * s.z * (0.05 + s2.z) * (0.6 + 0.4 * gust);
+    let side = vec2<f32>(-d.y, d.x);
+    let xz = d * (lean + 0.4 * fl) + side * (0.6 * fl);
+    return vec3<f32>(xz.x, 0.0, xz.y);
 }
 "#;
 
@@ -1588,6 +1645,9 @@ struct GlowU {
     c0: vec4<f32>,
     c1: vec4<f32>,
     c2: vec4<f32>,
+    // x : part de la vie où la particule est allumée (1 : toujours) ; grossissement avec la
+    // distance : de ×1 à y m jusqu'à ×w à z m
+    extra: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> gu: GlowU;
 // position (repère du studio) et échelle de chaque objet
@@ -1640,7 +1700,10 @@ fn vs_glow(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) -
     let life = max(mix(gu.life.x, gu.life.y, rnd(&s0)), 0.1);
     let tt = max(gu.life.z, 0.0) / life + rnd(&s0);
     let cycle = u32(floor(tt));
-    let age = fract(tt);
+    // éteinte après sa part allumée de la boucle (balises clignotantes)
+    let duty = clamp(gu.extra.x, 0.01, 1.0);
+    if (fract(tt) > duty) { return o; }
+    let age = fract(tt) / duty;
     var s = pcg(s0 ^ (cycle * 2246822519u));
     let t = age * life;
 
@@ -1665,7 +1728,8 @@ fn vs_glow(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) -
 
     let size_r = rnd(&s);
     let sz_k = curve3(vec4<f32>(gu.scale.x), vec4<f32>(gu.scale.y), vec4<f32>(gu.scale.z), age).x;
-    var h = mix(gu.size.x, gu.size.y, size_r) * 0.5 * sz_k * sc;
+    let grow = mix(1.0, gu.extra.w, clamp((d - gu.extra.y) / max(gu.extra.z - gu.extra.y, 1e-3), 0.0, 1.0));
+    var h = mix(gu.size.x, gu.size.y, size_r) * 0.5 * sz_k * sc * grow;
 
     let f = (cam - q) / max(d, 1e-3);
     var right = cross(vec3<f32>(0.0, 1.0, 0.0), f);
@@ -1732,6 +1796,7 @@ struct GlowUniform {
     c0: [f32; 4],
     c1: [f32; 4],
     c2: [f32; 4],
+    extra: [f32; 4],
 }
 
 /// Un effet de lueur prêt à dessiner : ses paramètres et les objets qui le jouent.
@@ -1859,7 +1924,13 @@ struct Globals {
     wake_pt: [[f32; 4]; crate::wake::MAX_POINTS],
     light_n: [f32; 4],
     lights: [[f32; 4]; MAX_LIGHTS * 3],
+    sway: [f32; 4],
+    sway2: [f32; 4],
 }
+
+/// Déplacement (m) d'un sommet de poids 1 sous un vent de `Strength` 1 et de force 1 : la cime
+/// d'un arbre (poids 0,2 à 0,4) se penche de 30 à 60 cm, le bord d'un buisson (0,13) de 20 cm.
+const SWAY_AMPLITUDE: f32 = 1.5;
 
 /// Lumières du décor envoyées au shader : les plus proches de la caméra parmi celles qui
 /// éclairent quelque chose dans le champ.
@@ -1971,6 +2042,9 @@ struct GpuMesh {
     forcefield: bool,
     /// couleur du champ de force (linéaire)
     ff_color: [f32; 3],
+    /// matériau lumineux (voir [`self_lit_gain`]) : sa couleur s'ajoute, sans éclairage, dans la
+    /// passe des champs de force ; 0 pour les autres
+    self_lit: f32,
     /// terrain : textures de détail (minuscules) du sol et de la roche, avec le côté d'une
     /// répétition (m)
     detail: Vec<(String, f32)>,
@@ -2075,6 +2149,12 @@ impl GpuMesh {
         decal.texture_for(self.decal_default.as_deref()).map(|t| t.to_ascii_lowercase())
     }
 
+    /// Dessiné après l'opaque, sans écrire la profondeur ni projeter d'ombre : champ de force ou
+    /// matériau lumineux.
+    fn translucent(&self) -> bool {
+        self.forcefield || self.self_lit > 0.0
+    }
+
     fn material_key(&self, camo: Option<&str>, decal: Option<&str>) -> String {
         format!("{}|{}|{}", self.material, camo.unwrap_or(""), decal.unwrap_or(""))
     }
@@ -2109,6 +2189,31 @@ fn forcefield_color(c: Option<[f32; 4]>) -> [f32; 3] {
         return [0.45, 0.7, 1.0];
     }
     [r / m * 0.8, g / m * 0.8, b / m * 0.8]
+}
+
+/// Matériaux lumineux du jeu, dessinés en lumière ajoutée (sans éclairage) : leur couleur est
+/// celle de la lumière, le noir est transparent. Ils n'ont pas de `_S` (dont le canal B porte les
+/// lumières des autres matériaux) : rendus comme une surface ordinaire, ils restaient mats, même
+/// de nuit. Renvoie le gain de leur couleur (linéaire), 0 pour les autres matériaux.
+/// - `Glow`, `GlowBlend*` : bandes lumineuses des portails de distorsion
+///   (`Common_Structures_Warpgate_TilingGlowA_C.dds`), grille des bacs du Biolab ;
+/// - `SimpleEmissive` : ampoules unies (`yellow.dds` des mâts d'éclairage) ;
+/// - `BumpRigidHologram*` : écrans des consoles et des murs de moniteurs
+///   (`Common_Props_MonitorScreenAtlas_01.dds`), plus doux.
+fn self_lit_gain(material_definition: &str) -> f32 {
+    let m = material_definition.to_ascii_lowercase();
+    if m.starts_with("bumprigidhologram") {
+        1.2
+    } else if m == "simpleemissive" {
+        3.0
+    } else if m == "glow" {
+        // (leur alpha, 0,1 à 0,5, dose la lumière)
+        6.0
+    } else if m.starts_with("glowblend") {
+        2.5
+    } else {
+        0.0
+    }
 }
 
 /// Matériaux d'eau (ruisseaux, bassins) : leur couleur est un simple `grey.dds`.
@@ -2435,6 +2540,8 @@ pub struct Renderer {
     glows: Vec<GpuGlow>,
     /// objets du décor qui jouent une lueur : effet, position (repère du décor), échelle
     decor_glows: Vec<(usize, Vec3, f32)>,
+    /// balancement des plantes de la carte du décor (`None` : sans décor)
+    decor_sway: Option<crate::sky::Sway>,
     /// temps de la timeline (s) : position des particules, défilement des nuages
     pub particle_time: f32,
     /// sillages des personnages dans l'eau du décor, à l'image courante (voir `wake.rs`)
@@ -2488,7 +2595,8 @@ impl Renderer {
     pub fn from_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("studio"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(format!("{SHADER}
+{SWAY_SHADER}").into()),
         });
         let globals_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("globals"),
@@ -2670,7 +2778,8 @@ impl Renderer {
         // passe d'ombre : profondeur seule, vue du soleil
         let shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shadow"),
-            source: wgpu::ShaderSource::Wgsl(SHADOW_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(format!("{SHADOW_SHADER}
+{SWAY_SHADER}").into()),
         });
         let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shadow"),
@@ -2695,6 +2804,11 @@ impl Renderer {
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Uint32x4, offset: 32, shader_location: 3 },
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 48, shader_location: 4 },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: std::mem::offset_of!(forgelight::Vertex, color) as u64,
+                shader_location: 8,
+            },
         ];
         let mk_shadow = |entry: &str| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(entry),
@@ -2737,7 +2851,8 @@ impl Renderer {
         let shadow_bufs: [wgpu::Buffer; 2] = std::array::from_fn(|_| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("shadow"),
-                size: 64,
+                // projection du soleil (64 octets), balancement des plantes (2 × 16)
+                size: 96,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
@@ -3091,6 +3206,7 @@ impl Renderer {
             glow_pipeline,
             glows,
             decor_glows: Vec::new(),
+            decor_sway: None,
             particle_time: 0.0,
             wakes: Default::default(),
             sat_bind_layout,
@@ -3115,7 +3231,7 @@ impl Renderer {
     ) -> ScenePipelines {
         let mesh_attrs = wgpu::vertex_attr_array![
             0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Uint32x4, 4 => Float32x4, 5 => Float32x4,
-            6 => Float32x2, 7 => Float32x2
+            6 => Float32x2, 7 => Float32x2, 8 => Float32x4
         ];
         // `translucent` : champs de force, mélangés (couleur prémultipliée) sans écrire la profondeur
         let mk_mesh = |entry: &str, fs: &str, translucent: bool| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -3810,7 +3926,7 @@ impl Renderer {
             flag(overlay.is_none() && tint_mask.is_some()),
             mesh.detail_repeat,
             flag(blend.is_some()),
-            0.0,
+            mesh.self_lit,
             0.0,
         ];
         let mut params: Vec<f32> = params.to_vec();
@@ -3984,6 +4100,7 @@ impl Renderer {
                     + if m.material_definition == "Terrain" { "|t" } else { "" }
                     + if is_water(&m.material_definition) { "|w" } else { "" }
                     + &if m.is_forcefield() { format!("|ff{:?}", forcefield_color(m.color)) } else { String::new() }
+                    + &if self_lit_gain(&m.material_definition) > 0.0 { format!("|sl{}", self_lit_gain(&m.material_definition)) } else { String::new() }
                     + &m.terrain_detail.iter().map(|d| format!("|{}", d.0.to_ascii_lowercase())).collect::<String>()
                     + &if m.terrain_edges != 0 { format!("|e{}", m.terrain_edges) } else { String::new() }
                     + &m.terrain_blend.as_ref().map_or(String::new(), |t| format!("|{}", t.to_ascii_lowercase()))
@@ -3998,6 +4115,7 @@ impl Renderer {
                 water: is_water(&m.material_definition),
                 forcefield: m.is_forcefield(),
                 ff_color: forcefield_color(m.color),
+                self_lit: self_lit_gain(&m.material_definition),
                 detail: m.terrain_detail.iter().map(|(t, s)| (t.to_ascii_lowercase(), *s)).collect(),
                 detail_edges: m.terrain_edges,
                 blend: m.terrain_blend.as_ref().map(|t| t.to_ascii_lowercase()),
@@ -4034,6 +4152,21 @@ impl Renderer {
     /// [`Self::upload_model`] ; les instances sans modèle sont ignorées au dessin.
     /// `ground` : hauteur du jeu ramenée à y = 0 dans ces matrices (voir [`Self::set_decor_ground`]).
     /// Lumières placées du décor (lampes, projecteurs).
+    pub fn set_decor_sway(&mut self, sway: Option<crate::sky::Sway>) {
+        self.decor_sway = sway;
+    }
+
+    /// Balancement des plantes pour le shader (voir `sway_offset`) : celui de la carte, dans la
+    /// direction et à la force du vent des particules (menu Décor > Particules ; force 0 : plantes
+    /// immobiles), au temps de la timeline. Nul sans décor affiché.
+    fn sway_uniform(&self) -> ([f32; 4], [f32; 4]) {
+        let Some(s) = self.decor_sway.filter(|_| self.decor_active()) else { return ([0.0; 4], [0.0; 4]) };
+        let p = &self.particle_settings;
+        let a = p.wind_dir.to_radians();
+        let amp = s.strength * p.wind.max(0.0) * SWAY_AMPLITUDE;
+        ([a.cos(), a.sin(), amp, self.particle_time.max(0.0)], [s.spacing, s.speed, s.boil, s.smoothing])
+    }
+
     pub fn set_decor_lights(&mut self, lights: &[DecorLight]) {
         self.decor_lights = lights.to_vec();
     }
@@ -4163,6 +4296,7 @@ impl Renderer {
                 c0: lin(def.colors[0]),
                 c1: lin(def.colors[1]),
                 c2: lin(def.colors[2]),
+                extra: [def.duty, def.grow[0], def.grow[1], def.grow[2]],
             };
             self.queue.write_buffer(&self.glows[i].anchors, 0, bytemuck::cast_slice(&anchors));
             self.queue.write_buffer(&self.glows[i].uniform, 0, bytemuck::bytes_of(&u));
@@ -4183,6 +4317,13 @@ impl Renderer {
             .collect();
         self.decor = self.build_decor(instances);
         self.flora = None;
+    }
+
+    /// Balises lumineuses du décor (voir [`crate::particles::BEACON`]) : position dans le repère de
+    /// [`Self::set_decor`] et échelle (côté / [`crate::particles::BEACON_SIZE`]). À appeler après
+    /// [`Self::set_decor`], qui les retire.
+    pub fn add_decor_beacons(&mut self, beacons: &[(Vec3, f32)]) {
+        self.decor_glows.extend(beacons.iter().map(|&(p, s)| (crate::particles::BEACON, p, s)));
     }
 
     /// Remplace la flore du sol (instances dans le repère de [`Self::set_decor`]) ; elle suit le
@@ -4515,10 +4656,12 @@ impl Renderer {
             self.materials.extend(created);
         }
         let flag = |b: bool| if b { 1.0 } else { 0.0 };
+        let (sway, sway2) = self.sway_uniform();
         let (char_shadow, shadow) = if self.shadows { self.fit_shadows(items) } else { (None, None) };
         for (i, s) in [&char_shadow, &shadow].into_iter().enumerate() {
             if let Some(s) = s {
                 self.queue.write_buffer(&self.shadow_bufs[i], 0, bytemuck::cast_slice(&s.light_vp.to_cols_array()));
+                self.queue.write_buffer(&self.shadow_bufs[i], 64, bytemuck::cast_slice(&[sway, sway2]));
             }
         }
         let draw_sky = self.sky.is_some() && self.decor_active();
@@ -4628,6 +4771,8 @@ impl Renderer {
             wake_pt: [[0.0; 4]; crate::wake::MAX_POINTS],
             light_n: [0.0; 4],
             lights: [[0.0; 4]; MAX_LIGHTS * 3],
+            sway,
+            sway2,
         };
         let mut g = g;
         let glow_objs = self.glow_objects(items);
@@ -4711,7 +4856,7 @@ impl Renderer {
             for it in items {
                 let (Some(model), Some(ga)) = (self.models.get(&it.asset), self.actors.get(&it.id)) else { continue };
                 pass.set_bind_group(1, &ga.bind, &[]);
-                for m in model.meshes.iter().filter(|m| !m.forcefield) {
+                for m in model.meshes.iter().filter(|m| !m.translucent()) {
                     pass.set_vertex_buffer(0, m.vbuf.slice(..));
                     pass.set_index_buffer(m.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..m.index_count, 0, 0..1);
@@ -4726,7 +4871,7 @@ impl Renderer {
                 pass.set_bind_group(1, &d.bind, &[]);
                 for b in d.batches.iter().filter(|b| b.shadow) {
                     let Some(model) = self.models.get(&b.asset) else { continue };
-                    for m in model.meshes.iter().filter(|m| !m.alpha_test && !m.water && !m.forcefield) {
+                    for m in model.meshes.iter().filter(|m| !m.alpha_test && !m.water && !m.translucent()) {
                         pass.set_vertex_buffer(0, m.vbuf.slice(..));
                         pass.set_index_buffer(m.ibuf.slice(..), wgpu::IndexFormat::Uint32);
                         pass.draw_indexed(0..m.index_count, 0, b.first..b.first + b.count);
@@ -4778,7 +4923,7 @@ impl Renderer {
             for it in items {
                 let (Some(model), Some(ga)) = (self.models.get(&it.asset), self.actors.get(&it.id)) else { continue };
                 pass.set_bind_group(1, &ga.bind, &[]);
-                for m in model.meshes.iter().filter(|m| !m.forcefield) {
+                for m in model.meshes.iter().filter(|m| !m.translucent()) {
                     let (key, _, _) = m.resolve(it);
                     let Some(mat) = self.materials.get(&key) else { continue };
                     pass.set_bind_group(2, mat, &[]);
@@ -4793,7 +4938,7 @@ impl Renderer {
                 pass.set_bind_group(1, &d.bind, &[]);
                 for b in &d.batches {
                     let Some(model) = self.models.get(&b.asset) else { continue };
-                    for m in model.meshes.iter().filter(|m| !m.forcefield) {
+                    for m in model.meshes.iter().filter(|m| !m.translucent()) {
                         let Some(mat) = self.materials.get(&m.material_key(None, None)) else { continue };
                         pass.set_bind_group(2, mat, &[]);
                         pass.set_vertex_buffer(0, m.vbuf.slice(..));
@@ -4810,11 +4955,11 @@ impl Renderer {
             pass.set_pipeline(&self.ff_mesh_pipeline);
             for it in items {
                 let (Some(model), Some(ga)) = (self.models.get(&it.asset), self.actors.get(&it.id)) else { continue };
-                if !model.meshes.iter().any(|m| m.forcefield) {
+                if !model.meshes.iter().any(|m| m.translucent()) {
                     continue;
                 }
                 pass.set_bind_group(1, &ga.bind, &[]);
-                for m in model.meshes.iter().filter(|m| m.forcefield) {
+                for m in model.meshes.iter().filter(|m| m.translucent()) {
                     let (key, _, _) = m.resolve(it);
                     let Some(mat) = self.materials.get(&key) else { continue };
                     pass.set_bind_group(2, mat, &[]);
@@ -4828,7 +4973,7 @@ impl Renderer {
                 pass.set_bind_group(1, &d.bind, &[]);
                 for b in &d.batches {
                     let Some(model) = self.models.get(&b.asset) else { continue };
-                    for m in model.meshes.iter().filter(|m| m.forcefield) {
+                    for m in model.meshes.iter().filter(|m| m.translucent()) {
                         let Some(mat) = self.materials.get(&m.material_key(None, None)) else { continue };
                         pass.set_bind_group(2, mat, &[]);
                         pass.set_vertex_buffer(0, m.vbuf.slice(..));
