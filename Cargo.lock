@@ -1210,7 +1210,7 @@ dependencies = [
 
 [[package]]
 name = "flcli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "forgelight",
@@ -1253,7 +1253,7 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "forgelight"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2603,7 +2603,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "planet-studio"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bytemuck",
